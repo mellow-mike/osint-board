@@ -6,9 +6,10 @@ live vessel and aircraft tracking — is modelled in one catalog, wired through 
 everything with a location lands on the globe in the right place, at the right precision, with layer toggles
 and colour coding. A fast, type-aware search box is the entry point to every investigation.
 
-> Status: **scaffold**. The architecture, catalog, documentation, deployment files and the core code paths are
-> in place and tested; most of the 239 modules are still to be implemented in the phases described in
-> [docs/09-roadmap.md](docs/09-roadmap.md).
+> Status: **phase 1 in progress**. The architecture, catalog, documentation, deployment files and the core code
+> paths are in place and tested; every free API in the catalog that still exists is wired up (108 modules with
+> offline fixture tests, including the AIS, GDELT, OpenCellID and Tor feeds), and the remaining internal and
+> tiered replacements follow the phases described in [docs/09-roadmap.md](docs/09-roadmap.md).
 
 ## What it does
 

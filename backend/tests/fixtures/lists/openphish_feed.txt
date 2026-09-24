@@ -1,0 +1,2 @@
+https://login.bad-example.org/secure/
+http://198.51.100.23/paypal/

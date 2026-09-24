@@ -1,0 +1,1 @@
+{"responseCode":200,"count":2,"data":[{"query":"www.example.com","answer":"203.0.113.7","rrtype":"a","times":50,"firstSeenTimestamp":1700000000000,"lastSeenTimestamp":1758700000000},{"query":"cdn.example.net","answer":"203.0.113.7","rrtype":"a","times":2,"firstSeenTimestamp":1750000000000,"lastSeenTimestamp":1758700000000}]}

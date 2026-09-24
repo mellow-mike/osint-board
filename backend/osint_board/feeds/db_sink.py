@@ -1,4 +1,5 @@
-"""Persist feed emissions: events → geo_events, tracks → tracks/track_positions, satellites → satellites.
+"""Persist feed emissions: events → geo_events, tracks → tracks/track_positions, satellites → satellites,
+static objects (cell towers, Wi-Fi APs, Tor relays) → static_features.
 Publishes compact deltas on Redis ``layer:<id>`` for the WebSocket stream."""
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from osint_board.entities.types import EntityType
 from osint_board.modules.types import Emit
 
 _TRACK_TYPES = {EntityType.VESSEL, EntityType.AIRCRAFT, EntityType.POSITION}
+_STATIC_TYPES = {EntityType.CELL_TOWER, EntityType.WIFI_AP, EntityType.TOR_RELAY}
 
 _UPSERT_EVENT = text(
     """
@@ -40,6 +42,13 @@ _INSERT_POSITION = text(
     ON CONFLICT DO NOTHING
     """
 )
+_UPSERT_STATIC = text(
+    """
+    INSERT INTO static_features (layer, key, geom, props)
+    VALUES (:layer, :key, ST_SetSRID(ST_MakePoint(:lon, :lat), 4326), CAST(:props AS jsonb))
+    ON CONFLICT (layer, key) DO UPDATE SET geom = EXCLUDED.geom, props = static_features.props || EXCLUDED.props, updated_at = now()
+    """
+)
 _UPSERT_SAT = text(
     """
     INSERT INTO satellites (norad_id, name, intl_designator, line1, line2, epoch, object_class, "group")
@@ -60,7 +69,7 @@ class DbSink:
 
     async def write(self, module_id: str, emits: Iterable[Emit]) -> int:
         now = datetime.now(tz=UTC)
-        events, tracks, positions, sats, deltas = [], [], [], [], []
+        events, tracks, positions, sats, statics, deltas = [], [], [], [], [], []
         for e in emits:
             layer = e.layer or "investigation"
             if e.type is EntityType.SATELLITE:
@@ -81,6 +90,18 @@ class DbSink:
             if e.geo is None:
                 continue
             ts = e.observed_at or now
+            if e.type in _STATIC_TYPES:
+                key = (e.key or f"{layer}:{e.value}").split(":", 1)[-1]
+                statics.append(
+                    {
+                        "layer": layer,
+                        "key": key,
+                        "lon": e.geo.lon,
+                        "lat": e.geo.lat,
+                        "props": _json({**e.meta, "name": e.value, "precision": e.geo.precision, "observed_at": ts}),
+                    }
+                )
+                continue
             if e.type in _TRACK_TYPES:
                 tid = e.key or f"{layer}:{e.value}"
                 row = {
@@ -154,9 +175,11 @@ class DbSink:
                 await session.execute(_INSERT_POSITION, positions)
             if sats:
                 await session.execute(_UPSERT_SAT, sats)
+            if statics:
+                await session.execute(_UPSERT_STATIC, statics)
         if self.redis is not None and deltas:
             pipe = self.redis.pipeline()
             for layer, delta in deltas:
                 pipe.publish(f"layer:{layer}", _json(delta))
             await pipe.execute()
-        return len(events) + len(tracks) + len(sats)
+        return len(events) + len(tracks) + len(sats) + len(statics)

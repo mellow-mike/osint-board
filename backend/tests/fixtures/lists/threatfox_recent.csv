@@ -1,0 +1,6 @@
+################################################################
+# ThreatFox IOCs: recent (last 48 hours)                      #
+################################################################
+# first_seen_utc,ioc_id,ioc_value,ioc_type,threat_type,fk_malware,malware_alias,malware_printable,last_seen_utc,confidence_level,reference,tags,anonymous,reporter
+"2026-09-23 10:00:00", "1234", "203.0.113.7:443", "ip:port", "botnet_cc", "win.cobalt_strike", "BEACON", "Cobalt Strike", "", "100", "https://example.org/r", "CobaltStrike", "0", "abuse_ch"
+"2026-09-23 10:05:00", "1235", "bad-example.org", "domain", "payload_delivery", "win.emotet", "Geodo", "Emotet", "", "75", "", "Emotet", "0", "abuse_ch"

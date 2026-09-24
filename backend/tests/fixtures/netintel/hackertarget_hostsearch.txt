@@ -1,0 +1,4 @@
+www.example.com,203.0.113.7
+mail.example.com,203.0.113.8
+notexample.com,203.0.113.9
+example.com,203.0.113.7
