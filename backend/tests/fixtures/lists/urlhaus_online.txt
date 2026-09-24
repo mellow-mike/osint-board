@@ -1,2 +1,0 @@
-# URLhaus online
-http://malware.bad-example.org/dl/payload.exe

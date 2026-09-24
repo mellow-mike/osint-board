@@ -1,3 +1,0 @@
-{"count": 120, "time_first": 1700000000, "time_last": 1758700000, "rrtype": "A", "rrname": "example.com", "rdata": "203.0.113.7"}
-{"count": 4, "time_first": 1700000000, "time_last": 1758700000, "rrtype": "NS", "rrname": "example.com", "rdata": "ns1.example.net"}
-{"count": 4, "time_first": 1700000000, "time_last": 1758700000, "rrtype": "MX", "rrname": "example.com", "rdata": "10 mx.example.org"}

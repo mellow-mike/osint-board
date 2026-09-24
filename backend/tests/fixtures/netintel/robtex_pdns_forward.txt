@@ -1,4 +1,0 @@
-{"rrname":"example.com","rrdata":"203.0.113.7","rrtype":"A","time_first":1700000000,"time_last":1758700000,"count":120}
-{"rrname":"example.com","rrdata":"ns1.example.net","rrtype":"NS","time_first":1700000000,"time_last":1758700000,"count":40}
-{"rrname":"example.com","rrdata":"10 mx.example.org","rrtype":"MX","time_first":1700000000,"time_last":1758700000,"count":40}
-{"rrname":"example.com","rrdata":"v=spf1 -all","rrtype":"TXT","time_first":1700000000,"time_last":1758700000,"count":4}

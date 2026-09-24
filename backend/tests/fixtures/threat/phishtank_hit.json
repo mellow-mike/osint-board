@@ -1,1 +1,0 @@
-{"meta":{"timestamp":"2026-09-24T12:00:00+00:00","serverid":"a1","status":"success","requestid":"x"},"results":{"url":"http://login.bad-example.org/","in_database":true,"phish_id":8123456,"phish_detail_page":"http://www.phishtank.com/phish_detail.php?phish_id=8123456","verified":true,"verified_at":"2026-09-20T10:00:00+00:00","valid":true}}

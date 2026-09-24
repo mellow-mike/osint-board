@@ -1,5 +1,0 @@
-[["original","timestamp","statuscode","mimetype"],
-["http://example.com/","20100101000000","200","text/html"],
-["https://www.example.com/about","20200505120000","200","text/html"],
-["https://dev.example.com/backup.zip","20210606120000","200","application/zip"],
-["https://www.example.com/docs/report.pdf","20220707120000","200","application/pdf"]]
