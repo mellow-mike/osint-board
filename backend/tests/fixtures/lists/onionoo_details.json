@@ -1,4 +1,0 @@
-{"version":"9.1","relays_published":"2026-09-24 12:00:00","relays":[
-{"nickname":"ExampleExit","fingerprint":"ABCDEF0123456789ABCDEF0123456789ABCDEF01","or_addresses":["203.0.113.7:9001","[2001:db8::7]:9001"],"exit_addresses":["203.0.113.7"],"last_seen":"2026-09-24 12:00:00","first_seen":"2024-01-01 00:00:00","running":true,"flags":["Exit","Fast","Guard","Running","Stable","Valid"],"country":"de","country_name":"Germany","city_name":"Berlin","latitude":52.52,"longitude":13.405,"as":"AS64500","as_name":"Example Hosting","consensus_weight":12000,"platform":"Tor 0.4.8.10 on Linux"},
-{"nickname":"MiddleOne","fingerprint":"0123456789ABCDEF0123456789ABCDEF01234567","or_addresses":["198.51.100.40:443"],"last_seen":"2026-09-24 12:00:00","first_seen":"2025-05-05 00:00:00","running":true,"flags":["Fast","Running","Stable","Valid"],"country":"us","latitude":37.751,"longitude":-97.822,"as":"AS64501","as_name":"Other"}
-],"bridges_published":"2026-09-24 12:00:00","bridges":[]}

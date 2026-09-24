@@ -1,5 +1,0 @@
-# PhishScore | PhishStats
-# Score: 0-2 likely, 2-4 suspicious, 4-6 phishing, 6-10 omg phishing!
-# Fields: "Date","Score","URL","IP"
-"2026-09-20 11:02:33","5.10","https://login.bad-example.org/secure/","198.51.100.23"
-"2026-09-20 10:44:01","2.30","http://other.example/x","203.0.113.7"

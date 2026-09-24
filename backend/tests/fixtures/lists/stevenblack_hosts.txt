@@ -1,5 +1,0 @@
-# Title: StevenBlack/hosts
-127.0.0.1 localhost
-0.0.0.0 0.0.0.0
-0.0.0.0 ads.bad-example.org
-0.0.0.0 tracker.example.net

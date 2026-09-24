@@ -1,3 +1,0 @@
-{"urlkey": "com,example)/", "timestamp": "20260901120000", "url": "https://example.com/", "mime": "text/html", "mime-detected": "text/html", "status": "200", "digest": "ABC", "length": "1234", "offset": "100", "filename": "crawl-data/CC-MAIN-2026-38/segments/x/warc/CC-MAIN-x.warc.gz"}
-{"urlkey": "com,example,shop)/cart", "timestamp": "20260901130000", "url": "https://shop.example.com/cart", "mime": "text/html", "status": "200", "filename": "crawl-data/x.warc.gz"}
-{"urlkey": "com,example,shop)/cart?x=1", "timestamp": "20260901130001", "url": "https://shop.example.com/cart?x=1", "mime": "text/html", "status": "301", "filename": "crawl-data/x.warc.gz"}

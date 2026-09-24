@@ -259,7 +259,7 @@ def classify(token: str) -> list[Detection]:
 # --------------------------------------------------------------------------------------------------
 _SCAN = [
     (EntityType.URL, re.compile(r"\b(?:https?|ftp)://[^\s<>\"']+", re.I)),
-    (EntityType.EMAIL, re.compile(r"[A-Za-z0-9._%+\-][A-Za-z0-9._%+\-']*@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")),
+    (EntityType.EMAIL, re.compile(r"[A-Za-z0-9._%+\-']+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")),
     (EntityType.IP, re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")),
     (
         EntityType.IP,
