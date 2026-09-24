@@ -1,3 +1,0 @@
-# Generic format: IP # Description
-203.0.113.7 # Malicious Host US,,0.0,0.0,11
-198.51.100.23 # Scanning Host DE,Berlin,52.5,13.4,3

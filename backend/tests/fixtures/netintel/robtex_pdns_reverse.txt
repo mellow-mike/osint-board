@@ -1,2 +1,0 @@
-{"rrname":"www.example.com","rrdata":"203.0.113.7","rrtype":"A","time_first":1700000000,"time_last":1758700000,"count":120}
-{"rrname":"cdn.example.net","rrdata":"203.0.113.7","rrtype":"A","time_first":1700000000,"time_last":1758700000,"count":3}

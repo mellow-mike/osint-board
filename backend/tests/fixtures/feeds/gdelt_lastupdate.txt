@@ -1,3 +1,0 @@
-150000 abcdef1234 http://data.gdeltproject.org/gdeltv2/20260924120000.export.CSV.zip
-90000 abcdef5678 http://data.gdeltproject.org/gdeltv2/20260924120000.mentions.CSV.zip
-800000 abcdef9012 http://data.gdeltproject.org/gdeltv2/20260924120000.gkg.csv.zip
