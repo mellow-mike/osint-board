@@ -1,0 +1,5 @@
+<?xml version="1.0"?><rss version="2.0"><channel><title>Zone-H special defacements</title>
+<item><title>www.example.com</title><link>http://www.zone-h.org/mirror/id/123456</link><pubDate>Mon, 21 Sep 2026 10:00:00 +0000</pubDate><description><![CDATA[Defaced by someone]]></description></item>
+<item><title>http://shop.example.com/index.php</title><link>http://www.zone-h.org/mirror/id/123457</link><pubDate>Tue, 22 Sep 2026 10:00:00 +0000</pubDate></item>
+<item><title>other.example.net</title><link>http://www.zone-h.org/mirror/id/123458</link><pubDate>Tue, 22 Sep 2026 11:00:00 +0000</pubDate></item>
+</channel></rss>

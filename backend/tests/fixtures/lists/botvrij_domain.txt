@@ -1,0 +1,3 @@
+# ioclist.domain - botvrij.eu
+bad-example.org # malware: Emotet
+c2.bad-example.org # C2 server

@@ -78,6 +78,33 @@ python scripts/catalog.py scaffold greynoise_community      # writes modules/imp
 4. If the module needs a key, add `OSINT_MODULE_<ID>_API_KEY=` to `.env.example`.
 5. `make check`.
 
+## Shared helpers (`backend/osint_board/modules/`)
+
+Most free sources are variations on four patterns, so the modules built on them are declarative:
+
+| Helper | Provides | Built on it |
+|---|---|---|
+| `helpers.py` | `verdict()` (the one shape every "is X listed" answer takes), `host_of`, `registrable_domain`, `hosts_in` (bounded netblock expansion), `dedupe`, `to_datetime`, `name_candidates`, `find_onion_urls`, `strip_tags` | everything |
+| `lists.py` | `ListLookupModule` + `ListSource`: fetch-once, TTL-cached indicator lists (`ListCache`, one download per process per TTL) parsed into IP/CIDR/host/URL/hash sets and matched against any target type (`match`) — the in-process seed of the `threat_lists` service | blocklist.de, CINS, Emerging Threats, Greensnow, CleanTalk, CoinBlocker, botvrij, Steven Black, OpenPhish, PhishStats, VXVault, VoIPBL, multiproxy, CyberCrime-Tracker, AlienVault, Tor exits, abuse.ch, ThreatFox (keyless mode), Zone-H |
+| `dnsutil.py` | `DnsblModule` (zones, answer-code tables, error codes, key-prefixed zones) and `DnsFilterModule` (resolve on an unfiltered reference resolver, then on the filtering one; NXDOMAIN/REFUSED/sinkhole answers become verdicts) plus `query`/`DnsAnswer` | DroneBL, SpamCop, Spamhaus ZEN, SURBL, UCEPROTECT, Project Honey Pot; AdGuard, CleanBrowsing, Cloudflare, DNS for Family, OpenDNS, Quad9, Yandex, Comodo; OpenNIC, DNS raw records |
+| `buckets.py` | `BucketFinderModule`: name permutations of the target probed against a provider endpoint, public listings parsed | S3, Azure Blob, GCS, DigitalOcean Spaces |
+| `rdap.py` | RDAP (RFC 9083) client/parser: `parse_rdap` → `record_emits` (networks, ASNs, contacts, addresses) | ARIN, WHOIS (RDAP first, port 43 fallback) |
+| `http.py` | rate-limited `HttpClient` with `get_json_or_none` (404 → nothing known), `post_json`, `stream_bytes` (multi-GB dumps), and a Tor pool (`tor=True`) | everything |
+
+Conventions the helpers assume:
+
+- A module whose shared parser yields more than its catalog `produces` filters with
+  `e.type in self.spec.produces` before yielding, so the catalog stays the contract.
+- Keys are optional wherever the source has an open path (bulk feeds, anonymous quotas): `ctx.secret()` for
+  optional, `ctx.require_secret()` only when the source is unusable without one.
+- Scrape-style modules (`access: scrape`) keep one regex-based `parse_*` function and log a warning rather
+  than emitting when the page no longer matches; a fully unrecognised page raises so the run is recorded as an
+  error instead of silently "clean".
+
+Tests use four fixtures from `tests/conftest.py`: `fake_http` (routes `HttpClient` requests to fixture files
+by URL substring, query parameters included), `fake_dns` (answers `dnspython` queries from rules, per
+nameserver), `run_lookup` and `run_poll` (instantiate a module from the registry and collect its emissions).
+
 ## Reference implementations
 
 | id | Kind | Shows |
@@ -85,7 +112,13 @@ python scripts/catalog.py scaffold greynoise_community      # writes modules/imp
 | `usgs` | feed (poll, 1m) | Events with depth as negative altitude, stable keys, no key needed |
 | `celestrak` | feed (poll, daily) | Storing element sets for client/server propagation |
 | `nasa_firms` | feed (poll, 3h) | CSV feeds, required key, per-satellite sources |
+| `gdelt` | feed (poll, 15m) | Zipped TSV export, GDELT precision codes mapped to ours, skip-if-unchanged |
+| `aisstream` | feed (stream) | WebSocket push feed, vessel tracks keyed by MMSI, static data merged into track props |
+| `opencellid` | feed (poll, monthly) | Streamed gzip CSV (`HttpClient.stream_bytes`), static features |
+| `tor_exit_nodes` | lookup + feed | One class serving both an IP lookup and the hourly `tor` layer poll |
+| `abuse_ch` | lookup | Open bulk lists without a key, keyed API on top |
 | `crt_sh` | lookup | Domain to hostnames + certificates with relations to the target |
+| `arin` | lookup | RDAP for numbers, Whois-RWS reverse searches for people/orgs |
 | `dns_resolver` | lookup (internal) | Forward/reverse DNS with dnspython |
 | `email_extractor` | extract | Using `entities.detect.scan` |
 
