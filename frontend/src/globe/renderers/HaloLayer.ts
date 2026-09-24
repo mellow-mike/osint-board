@@ -14,6 +14,20 @@ export const PRECISION_RADIUS_M: Record<string, number> = {
   country: 600_000,
 };
 
+/** Precisions that may be drawn as a discrete marker — keep in sync with PIN_ALLOWED in precision.py. */
+export const PIN_PRECISIONS: ReadonlySet<string> = new Set(['exact', 'rooftop', 'street']);
+
+export function precisionOf(props: Record<string, unknown>): string | null {
+  const p = props['precision'] ?? props['geo_precision'];
+  return typeof p === 'string' && p !== '' ? p : null;
+}
+
+/** Whether a feature may be a pin. Feed fixes stored before precision was recorded (AIS, ADS-B, USGS) are exact. */
+export function allowsPin(props: Record<string, unknown>): boolean {
+  const p = precisionOf(props);
+  return p === null || PIN_PRECISIONS.has(p);
+}
+
 /**
  * Low-precision placements (IP geolocation, country centroids, profile locations) are drawn as translucent
  * discs sized by their uncertainty, never as pins, so the globe never over-claims what we know.
@@ -30,7 +44,7 @@ export class HaloLayer implements LayerRenderer {
   }
 
   private radius(f: RenderFeature): number {
-    const p = String(f.props['precision'] ?? f.props['geo_precision'] ?? 'city');
+    const p = precisionOf(f.props) ?? 'city';
     return Math.max(PRECISION_RADIUS_M[p] ?? 15_000, 2_000);
   }
 
@@ -62,6 +76,10 @@ export class HaloLayer implements LayerRenderer {
       point: r <= 2_000 ? { pixelSize: 6, color, outlineColor: Cesium.Color.BLACK, outlineWidth: 1 } : undefined,
     });
     entity.properties = new Cesium.PropertyBag({ feature: f });
+  }
+
+  remove(id: string): void {
+    this.source.entities.removeById(id);
   }
 
   setVisible(visible: boolean): void {

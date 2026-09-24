@@ -41,10 +41,35 @@ _INSERT_OBS = text(
 )
 
 
+#: How much of a document's text the entity row keeps; the full text stays in its observation (the evidence).
+EXCERPT_CHARS = 500
+
+
+def entity_meta(e: Emit) -> dict[str, Any]:
+    """Meta for the entity row: ``raw_content`` text is replaced by an excerpt and its length."""
+    if e.type is not EntityType.RAW_CONTENT or "text" not in e.meta:
+        return e.meta
+    meta = {k: v for k, v in e.meta.items() if k != "text"}
+    text = str(e.meta["text"] or "")
+    meta["excerpt"], meta["chars"] = text[:EXCERPT_CHARS], len(text)
+    return meta
+
+
+def _identity(etype: EntityType, value: str) -> str:
+    try:
+        return normalize(etype, value)
+    except ValueError:
+        return value
+
+
 class EntityStore:
+    """Upserts one run's emissions. Edges run from each emission's ``parent`` (the run's target when unset) to the
+    emission, so content-derived findings hang off the page they were found on."""
+
     def __init__(self, session: AsyncSession, geo: GeoResolver) -> None:
         self.session = session
         self.geo = geo
+        self._ids: dict[tuple[str | None, EntityType, str], uuid.UUID] = {}
 
     async def upsert(
         self,
@@ -79,7 +104,18 @@ class EntityStore:
             "geo_source": getattr(fix, "source", None),
             "geo_confidence": getattr(fix, "confidence", None),
         }
-        return (await self.session.execute(_UPSERT_ENTITY, params)).scalar_one()
+        eid = (await self.session.execute(_UPSERT_ENTITY, params)).scalar_one()
+        self._ids[(investigation_id, etype, params["normalized"])] = eid
+        return eid
+
+    async def ref_id(self, *, investigation_id: str | None, ref: EntityRef, module_id: str) -> uuid.UUID:
+        """Id of an entity referenced as a parent, upserting it only if this store has not seen it yet."""
+        known = self._ids.get((investigation_id, ref.type, _identity(ref.type, ref.value)))
+        if known is not None:
+            return known
+        return await self.upsert(
+            investigation_id=investigation_id, etype=ref.type, value=ref.value, module_id=module_id, meta=ref.meta
+        )
 
     async def store_emits(
         self,
@@ -107,16 +143,21 @@ class EntityStore:
                 value=e.value,
                 module_id=module_id,
                 confidence=e.confidence,
-                meta=e.meta,
+                meta=entity_meta(e),
                 geo=e.geo,
             )
             stats["entities"] += 1
             if e.relation:
+                from_id = (
+                    target_id
+                    if e.parent is None
+                    else await self.ref_id(investigation_id=investigation_id, ref=e.parent, module_id=module_id)
+                )
                 await self.session.execute(
                     _UPSERT_RELATION,
                     {
                         "inv": investigation_id,
-                        "from_id": target_id,
+                        "from_id": from_id,
                         "to_id": eid,
                         "rel_type": e.relation,
                         "module": module_id,

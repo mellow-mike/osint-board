@@ -62,6 +62,13 @@ export class OrbitLayer implements LayerRenderer {
     this.sats.set(f.id, { feature: f, satrec, point });
   }
 
+  remove(id: string): void {
+    const s = this.sats.get(id);
+    if (!s) return;
+    this.points.remove(s.point);
+    this.sats.delete(id);
+  }
+
   private tick(force = false): void {
     if (!this.visible && !force) return;
     const now = performance.now();

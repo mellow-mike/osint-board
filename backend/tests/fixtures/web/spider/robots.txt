@@ -1,0 +1,11 @@
+# Example Corp robots.txt
+User-agent: *
+Disallow: /
+
+User-agent: osint-board
+Disallow: /admin/
+Allow: /admin/public
+Disallow: /*.php$
+Crawl-delay: 0.01
+
+Sitemap: https://www.example.com/sitemap.xml

@@ -11,7 +11,7 @@ from typing import Any
 
 from osint_board.entities.types import EntityType
 from osint_board.modules.base import LookupModule
-from osint_board.modules.helpers import dedupe, host_emit
+from osint_board.modules.helpers import dedupe, host_emit, host_ref
 from osint_board.modules.registry import module
 from osint_board.modules.types import Emit, EntityRef
 
@@ -59,7 +59,7 @@ def parse_domain(payload: dict[str, Any], domain: str, target: EntityRef) -> lis
                         EntityType.IP,
                         str(addr),
                         relation="resolves_to",
-                        parent=EntityRef(EntityType.HOSTNAME, host),
+                        parent=host_ref(host, domain),
                         meta=meta,
                     )
                 )
@@ -69,7 +69,7 @@ def parse_domain(payload: dict[str, Any], domain: str, target: EntityRef) -> lis
                         EntityType.HOSTNAME,
                         str(rec["target"]).lower().rstrip("."),
                         relation="cname_target",
-                        parent=EntityRef(EntityType.HOSTNAME, host),
+                        parent=host_ref(host, domain),
                         meta={"source": "dnsdumpster"},
                         confidence=0.8,
                     )

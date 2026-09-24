@@ -63,6 +63,11 @@ def _json(d: dict[str, Any]) -> str:
     return json.dumps(d, default=str)
 
 
+def _geo_props(e: Emit) -> dict[str, str]:
+    """Every placed feature carries its precision and source so the globe can halo coarse ones."""
+    return {"precision": e.geo.precision, "geo_source": e.geo.source} if e.geo else {}
+
+
 class DbSink:
     def __init__(self, redis: Any | None = None) -> None:
         self.redis = redis
@@ -98,7 +103,7 @@ class DbSink:
                         "key": key,
                         "lon": e.geo.lon,
                         "lat": e.geo.lat,
-                        "props": _json({**e.meta, "name": e.value, "precision": e.geo.precision, "observed_at": ts}),
+                        "props": _json({**e.meta, "name": e.value, **_geo_props(e), "observed_at": ts}),
                     }
                 )
                 continue
@@ -110,7 +115,7 @@ class DbSink:
                     "key": tid.split(":", 1)[-1],
                     "name": e.meta.get("name") or e.value,
                     "kind": e.meta.get("kind"),
-                    "props": _json(e.meta),
+                    "props": _json({**e.meta, **_geo_props(e)}),
                     "time": ts,
                     "lon": e.geo.lon,
                     "lat": e.geo.lat,
@@ -148,7 +153,7 @@ class DbSink:
                         "lon": e.geo.lon,
                         "lat": e.geo.lat,
                         "alt_m": e.geo.alt_m,
-                        "props": _json(e.meta),
+                        "props": _json({**e.meta, **_geo_props(e)}),
                         "module": module_id,
                     }
                 )
@@ -163,7 +168,7 @@ class DbSink:
                             "alt": e.geo.alt_m,
                             "ts": ts.isoformat(),
                             "name": e.value,
-                            "props": e.meta,
+                            "props": {**e.meta, **_geo_props(e)},
                         },
                     )
                 )

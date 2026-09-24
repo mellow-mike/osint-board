@@ -1,0 +1,44 @@
+{
+  "items": [
+    {
+      "tags": ["php", "curl", "ssl"],
+      "owner": {
+        "account_id": 1234567,
+        "reputation": 1520,
+        "user_id": 7654321,
+        "user_type": "registered",
+        "profile_image": "https://www.gravatar.com/avatar/0000?s=256&d=identicon&r=PG",
+        "display_name": "jdoe_dev",
+        "link": "https://stackoverflow.com/users/7654321/jdoe-dev"
+      },
+      "is_answered": true,
+      "view_count": 812,
+      "answer_count": 2,
+      "score": 3,
+      "last_activity_date": 1756900000,
+      "creation_date": 1690000000,
+      "question_id": 76712345,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/76712345/curl-ssl-error-with-api-example-com",
+      "title": "cURL SSL error with api.example.com &quot;certificate has expired&quot;",
+      "body": "<p>Calling <code>https://api.example.com/v2/orders</code> from our staging box (<code>staging-7.example.com</code>) fails. Contact from the vendor: <a href=\"mailto:support@example.com\">support@example.com</a></p>\n<pre><code>curl -H 'X-Api-Key: ...' https://api.example.com/v2/orders\n</code></pre>"
+    },
+    {
+      "tags": ["dns"],
+      "owner": {"user_type": "does_not_exist", "display_name": "user99999"},
+      "is_answered": false,
+      "view_count": 40,
+      "answer_count": 0,
+      "score": 0,
+      "last_activity_date": 1700000000,
+      "creation_date": 1700000000,
+      "question_id": 77001234,
+      "link": "https://stackoverflow.com/questions/77001234/mx-records-for-example-com",
+      "title": "MX records for example.com",
+      "body": "<p>Why does example.com have a null MX?</p>"
+    }
+  ],
+  "has_more": true,
+  "quota_max": 300,
+  "quota_remaining": 297
+}

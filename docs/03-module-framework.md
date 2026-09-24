@@ -22,11 +22,17 @@ Modules **never** touch the database or the search index. They emit; `EntityStor
 
 ```python
 Emit(type=EntityType.HOSTNAME, value="mail.example.com", confidence=0.9,
-     relation="subdomain_of", parent=target,                # edge from the target to this emission
+     relation="subdomain_of", parent=target,                # edge from parent (default: the target) to this emission
      meta={"source_cert": 1001},                            # anything worth keeping as evidence
      geo=GeoPoint(lat, lon, alt_m, precision="exact", source="usgs"),   # only for direct geo
      key="usgs:ak0251abcd", layer="seismic", observed_at=datetime)      # events and tracks
 ```
+
+`EntityStore` draws each edge from the emission's `parent` when it is set, so a module can hang things off
+what it found rather than off the target (`page --content_of--> raw_content`, `question --posted_by-->
+username`); the parent entity is upserted if the run has not produced it yet. Content goes in
+`raw_content` emissions with the text in `meta["text"]`; the entity row keeps a 500-character `excerpt` and
+the length (`chars`), and the full text stays in the observation as evidence.
 
 ### Catalog vocabulary (`catalog/modules.yaml`)
 
@@ -56,6 +62,12 @@ layers/services referenced exist, feeds have cadences, paid modules name a repla
 2. `registry.instantiate(id, scope=..., config=...)` builds the context (per-module rate limit from the class).
 3. `await mod.setup()` validates keys and warms caches.
 4. Run. Errors propagate to the runner, which records them (`module_runs.error`) and backs off (feeds).
+5. Extract. The worker hands the run's emissions to `ExtractorPipeline` (`modules/extraction.py`): every
+   implemented extract module whose `consumes` lists an emission's type reads it (`raw_content` by its text,
+   URLs, phone numbers, addresses and records by their value), and what they find is fed back in once more
+   (a phone number on a page goes on to the country extractor). Findings keep the content they came from as
+   `parent` and are stored under the extractor's id in the same run. `osint-board modules run` prints them too
+   (`--no-extract` to skip).
 
 ## Authorisation and safety
 
@@ -84,7 +96,7 @@ Most free sources are variations on four patterns, so the modules built on them 
 
 | Helper | Provides | Built on it |
 |---|---|---|
-| `helpers.py` | `verdict()` (the one shape every "is X listed" answer takes), `host_of`, `registrable_domain`, `hosts_in` (bounded netblock expansion), `dedupe`, `to_datetime`, `name_candidates`, `find_onion_urls`, `strip_tags` | everything |
+| `helpers.py` | `verdict()` (the one shape every "is X listed" answer takes; `etype=` for `email_verdict` and other verdict types), `host_of`, `registrable_domain`, `hosts_in` (bounded netblock expansion), `dedupe`, `to_datetime`, `name_candidates`, `find_onion_urls`, `strip_tags` | everything |
 | `lists.py` | `ListLookupModule` + `ListSource`: fetch-once, TTL-cached indicator lists (`ListCache`, one download per process per TTL) parsed into IP/CIDR/host/URL/hash sets and matched against any target type (`match`) — the in-process seed of the `threat_lists` service | blocklist.de, CINS, Emerging Threats, Greensnow, CleanTalk, CoinBlocker, botvrij, Steven Black, OpenPhish, PhishStats, VXVault, VoIPBL, multiproxy, CyberCrime-Tracker, AlienVault, Tor exits, abuse.ch, ThreatFox (keyless mode), Zone-H |
 | `dnsutil.py` | `DnsblModule` (zones, answer-code tables, error codes, key-prefixed zones) and `DnsFilterModule` (resolve on an unfiltered reference resolver, then on the filtering one; NXDOMAIN/REFUSED/sinkhole answers become verdicts) plus `query`/`DnsAnswer` | DroneBL, SpamCop, Spamhaus ZEN, SURBL, UCEPROTECT, Project Honey Pot; AdGuard, CleanBrowsing, Cloudflare, DNS for Family, OpenDNS, Quad9, Yandex, Comodo; OpenNIC, DNS raw records |
 | `buckets.py` | `BucketFinderModule`: name permutations of the target probed against a provider endpoint, public listings parsed | S3, Azure Blob, GCS, DigitalOcean Spaces |
@@ -120,6 +132,7 @@ nameserver), `run_lookup` and `run_poll` (instantiate a module from the registry
 | `crt_sh` | lookup | Domain to hostnames + certificates with relations to the target |
 | `arin` | lookup | RDAP for numbers, Whois-RWS reverse searches for people/orgs |
 | `dns_resolver` | lookup (internal) | Forward/reverse DNS with dnspython |
+| `web_spider` | lookup (internal) | Polite crawl (robots.txt, crawl delay, per-host concurrency, depth/page/time limits) whose pages feed the extractors |
 | `email_extractor` | extract | Using `entities.detect.scan` |
 
 ## Retired upstreams

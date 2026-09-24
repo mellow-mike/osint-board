@@ -6,6 +6,7 @@ import type { RenderFeature } from './renderers/types';
 import { metersPerPixel } from './scaling';
 import { useLayerRendering } from './useLayerRendering';
 import { createViewer } from './viewer';
+import { readViewport } from './viewport';
 
 function pickedFeature(picked: unknown): RenderFeature | null {
   if (!picked || typeof picked !== 'object') return null;
@@ -27,6 +28,7 @@ export function GlobeViewer() {
   const requestFlyTo = useStore((s) => s.requestFlyTo);
   const setMetersPerPixel = useStore((s) => s.setMetersPerPixel);
   const setClockIso = useStore((s) => s.setClockIso);
+  const setViewport = useStore((s) => s.setViewport);
 
   useEffect(() => {
     let disposed = false;
@@ -70,6 +72,17 @@ export function GlobeViewer() {
       remove();
     };
   }, [viewer, select, setMetersPerPixel, setClockIso]);
+
+  useEffect(() => {
+    if (!viewer) return;
+    const update = () => setViewport(readViewport(viewer));
+    update();
+    const remove = viewer.camera.moveEnd.addEventListener(update);
+    return () => {
+      remove();
+      setViewport(null);
+    };
+  }, [viewer, setViewport]);
 
   useEffect(() => {
     if (!viewer || !flyTo) return;

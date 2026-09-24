@@ -8,6 +8,8 @@ import pytest
 
 from osint_board.entities.types import EntityType
 from osint_board.modules.impl.flickr import accuracy_precision
+from osint_board.modules.impl.venmo import parse_profile
+from osint_board.modules.types import EntityRef
 
 
 def _by_type(emits):
@@ -154,3 +156,53 @@ async def test_reversewhois_psbdmp_leaklookup(fake_http, run_lookup, monkeypatch
     fake_http.route("leak-lookup.com/api/search", file="people/leaklookup_error.json")
     with pytest.raises(RuntimeError, match="Invalid API key"):
         await run_lookup("leak_lookup", "username", "@jdoe")
+
+
+async def test_debounce(fake_http, run_lookup):
+    fake_http.route("disposable.debounce.io", file="people/debounce_disposable.json")
+    emits = await run_lookup("debounce", "email", "throwaway@mailinator.com")
+    assert [(e.type, e.value) for e in emits] == [
+        (EntityType.EMAIL_VERDICT, "debounce: throwaway@mailinator.com disposable")
+    ]
+    assert emits[0].meta["disposable"] is True and emits[0].meta["domain"] == "mailinator.com"
+    assert fake_http.calls[0][2]["params"] == {"email": "throwaway@mailinator.com"}
+
+    fake_http.route("api.debounce.io/v1/", file="people/debounce_validate.json")
+    emits = await run_lookup("debounce", "email", "info@example.com", config={"api_key": "db"})
+    assert emits[0].value == "debounce: info@example.com role"
+    assert (
+        emits[0].meta["role"] is True and emits[0].meta["free_email"] is False and "did_you_mean" not in emits[0].meta
+    )
+    assert fake_http.calls[-1][2]["params"] == {"api": "db", "email": "info@example.com"}
+
+    fake_http.routes.clear()
+    fake_http.route("api.debounce.io/v1/", file="people/debounce_error.json")
+    with pytest.raises(RuntimeError, match="Wrong API"):
+        await run_lookup("debounce", "email", "info@example.com", config={"api_key": "bad"})
+
+
+async def test_venmo(fake_http, run_lookup, fixtures_dir):
+    fake_http.route("account.venmo.com/u/jane-doe", file="people/venmo_profile.html")
+    emits = await run_lookup("venmo", "username", "@jane-doe")
+    profile = emits[0]
+    assert profile.type is EntityType.SOCIAL_PROFILE and profile.value == "https://account.venmo.com/u/jane-doe"
+    assert profile.meta["name"] == "Jane Doe" and profile.meta["user_id"] == "2051234567890123456"
+    assert profile.meta["joined"] == "2016-05-02T18:25:43"
+    assert [(e.type, e.value) for e in emits[1:]] == [(EntityType.PERSON, "Jane Doe")]  # not the friend's name
+
+    fake_http.route("account.venmo.com/u/john-roe", file="people/venmo_og_only.html")
+    emits = await run_lookup("venmo", "username", "john-roe")
+    assert emits[0].meta["name"] == "John Roe" and emits[0].meta["about"] == "Pay John Roe on Venmo"
+
+    # a user called "login" is a profile, not the sign-in wall
+    page = (fixtures_dir / "people/venmo_og_only.html").read_text()
+    login = parse_profile(page, "https://account.venmo.com/u/login", EntityRef(EntityType.USERNAME, "login"))
+    assert login[0].value == "https://account.venmo.com/u/login"
+    with pytest.raises(RuntimeError, match="sign-in"):
+        parse_profile(page, "https://account.venmo.com/sign-in?next=/u/jane", EntityRef(EntityType.USERNAME, "jane"))
+
+    fake_http.route("account.venmo.com/u/nobody", "", status=404)
+    assert await run_lookup("venmo", "username", "nobody") == []
+    fake_http.route("account.venmo.com/u/changed", file="people/venmo_generic.html")
+    with pytest.raises(RuntimeError, match="not recognised"):
+        await run_lookup("venmo", "username", "changed")

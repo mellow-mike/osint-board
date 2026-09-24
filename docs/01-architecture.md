@@ -28,7 +28,8 @@ flowchart TB
   subgraph ondemand["worker process"]
     Q[(Redis queue)] --> W[run_module]
     W --> LM[Lookup module]
-    LM -->|Emit| ES[EntityStore]
+    LM -->|Emit| EX[ExtractorPipeline]
+    EX -->|Emit + findings| ES[EntityStore]
     ES -->|geo resolution| GR[GeoResolver]
     ES --> ENT[(entities / relations / observations)]
     ES --> IDX[(Meilisearch)]
@@ -53,8 +54,10 @@ lookups per detection, a Meilisearch fuzzy query, and a live-track lookup for MM
 
 **Module run.** `POST /api/modules/{id}/run` validates that the module accepts the entity type and enqueues an
 arq job. The worker instantiates the module with the investigation's `Scope`, refuses active modules outside
-it, collects emissions, and `EntityStore` upserts entities (with geo resolution), relations and observations,
-then updates the search index.
+it, collects emissions, runs the extract modules over the content they carry (`ExtractorPipeline`: pages,
+documents, URLs, phone numbers), and `EntityStore` upserts entities (with geo resolution), relations (from each
+emission's parent, so findings hang off the page they were found on) and observations, then updates the search
+index. `GET /api/investigations/{id}/graph` returns the result as nodes and edges.
 
 **Feed ingest.** `FeedRunner` supervises one asyncio task per feed. Pull feeds run `poll()` every `cadence`;
 push feeds run `stream()` and reconnect with backoff. Emissions with `geo` become `geo_events` (timestamped

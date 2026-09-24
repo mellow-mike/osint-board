@@ -13,6 +13,7 @@ export interface LayerRenderer {
   setFeatures(features: RenderFeature[]): void;
   /** Merge one feature (live delta). */
   upsert(feature: RenderFeature): void;
+  remove(id: string): void;
   setVisible(visible: boolean): void;
   count(): number;
   destroy(): void;

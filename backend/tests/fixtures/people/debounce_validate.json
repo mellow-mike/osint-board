@@ -1,0 +1,14 @@
+{
+  "debounce": {
+    "email": "info@example.com",
+    "code": "8",
+    "role": "true",
+    "free_email": "false",
+    "result": "Safe to Send",
+    "reason": "Role",
+    "send_transactional": "1",
+    "did_you_mean": ""
+  },
+  "success": "1",
+  "balance": "4210"
+}

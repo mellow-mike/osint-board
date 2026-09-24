@@ -128,33 +128,39 @@ def modules_list(status: str | None = None, phase: int | None = None, consumes: 
 
 
 @modules_app.command("run")
-def modules_run(module_id: str, entity_type: str, value: str, allow_active: bool = False) -> None:
-    """Run a lookup module locally and print its emissions (no persistence)."""
+def modules_run(module_id: str, entity_type: str, value: str, allow_active: bool = False, extract: bool = True) -> None:
+    """Run a lookup module locally and print its emissions, then what the extractors find in them (no persistence)."""
     from osint_board.entities.types import EntityType
     from osint_board.modules.base import LookupModule, Scope
+    from osint_board.modules.extraction import ExtractorPipeline
     from osint_board.modules.registry import get_registry
-    from osint_board.modules.types import EntityRef
+    from osint_board.modules.types import Emit, EntityRef
+    from osint_board.worker.store import entity_meta
+
+    def show(e: Emit, extracted_by: str | None = None) -> None:
+        row = {"type": e.type.value, "value": e.value, "relation": e.relation, "confidence": e.confidence}
+        if e.parent is not None:
+            row["parent"] = f"{e.parent.type.value}:{e.parent.value}"
+        if extracted_by:
+            row["extracted_by"] = extracted_by
+        typer.echo(json.dumps({**row, "meta": entity_meta(e)}, default=str))
 
     async def _main() -> None:
-        mod = get_registry().instantiate(module_id, scope=Scope(allow_active=allow_active))
+        registry = get_registry()
+        mod = registry.instantiate(module_id, scope=Scope(allow_active=allow_active))
         if not isinstance(mod, LookupModule):
             raise typer.BadParameter(f"{module_id} is not a lookup module")
         target = EntityRef(EntityType(entity_type), value)
         mod.ctx.check_authorized(target)
         await mod.setup()
+        emits = []
         async for e in mod.lookup(target):
-            typer.echo(
-                json.dumps(
-                    {
-                        "type": e.type.value,
-                        "value": e.value,
-                        "relation": e.relation,
-                        "confidence": e.confidence,
-                        "meta": e.meta,
-                    },
-                    default=str,
-                )
-            )
+            emits.append(e)
+            show(e)
+        if extract:
+            for extractor_id, found in ExtractorPipeline(registry).run(emits).items():
+                for e in found:
+                    show(e, extractor_id)
 
     asyncio.run(_main())
 

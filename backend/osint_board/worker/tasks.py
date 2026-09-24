@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Any
 
@@ -14,6 +15,7 @@ from osint_board.db import session_scope
 from osint_board.entities.types import EntityType
 from osint_board.logging import configure_logging, get_logger
 from osint_board.modules.base import AuthorizationError, LookupModule, Scope
+from osint_board.modules.extraction import ExtractorPipeline
 from osint_board.modules.types import EntityRef
 from osint_board.worker.store import EntityStore
 
@@ -67,11 +69,21 @@ async def run_module(
         mod.ctx.check_authorized(target)
         await mod.setup()
         emits = [e async for e in mod.lookup(target)]
+        pipeline = ctx.get("extractors") or ExtractorPipeline(state.registry)
+        extracted = await asyncio.to_thread(pipeline.run, emits)  # CPU-bound; keep other jobs' I/O moving
         async with session_scope() as session:
-            stats = await EntityStore(session, state.geo).store_emits(
+            store = EntityStore(session, state.geo)
+            stats = await store.store_emits(
                 investigation_id=investigation_id, module_id=module_id, run_id=run_id, target=target, emits=emits
             )
+            for extractor_id, found in extracted.items():  # attributed to the extractor, same run
+                more = await store.store_emits(
+                    investigation_id=investigation_id, module_id=extractor_id, run_id=run_id, target=target, emits=found
+                )
+                for k, v in more.items():
+                    stats[k] += v
         stats["emitted"] = len(emits)
+        stats["extracted"] = sum(len(found) for found in extracted.values())
     except AuthorizationError as exc:
         status, error = "refused", str(exc)
     except Exception as exc:  # noqa: BLE001
@@ -94,6 +106,7 @@ async def run_module(
 async def startup(ctx: dict[str, Any]) -> None:
     configure_logging()
     ctx["state"] = await build_state()
+    ctx["extractors"] = ExtractorPipeline(ctx["state"].registry)
 
 
 async def shutdown(ctx: dict[str, Any]) -> None:

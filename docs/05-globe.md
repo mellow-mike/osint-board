@@ -26,15 +26,17 @@ visibility. See the table in [modules/CATALOG.md](modules/CATALOG.md#globe-layer
 
 | Render mode | Implementation | Used for |
 |---|---|---|
-| `points` | `PointPrimitiveCollection` (GPU, 100k+ features) | events, tracks (current position), reference points |
+| `points` | `PointPrimitiveCollection` (GPU, 100k+ features) behind `PrecisionSplitLayer`, which sends anything coarser than street to halos | events, tracks (current position), reference points |
 | `tracks` | points now; polylines of recent positions per selected track next | maritime, aviation |
 | `orbits` | SGP4 propagation on every clock tick (1 Hz), points at true altitude; orbit trail for the selected object next | space |
 | `heat` | translucent small points now; density raster next | news |
 | `halos` | translucent ellipses sized by precision radius | anything coarser than street precision |
 
-Tiled layers (`tiled: true`): cell towers and Wi-Fi are served as Mapbox vector tiles from `static_features`
-and only requested below a zoom threshold. The client-side MVT renderer is the next step after this scaffold
-(the endpoint is implemented).
+Tiled layers (`tiled: true`): cell towers and Wi-Fi live in `static_features` (tens of millions of rows).
+The client asks for them only when the camera is below 200 km (about web-map zoom 10), with the view rectangle
+as `bbox=` (split in two across the antimeridian); zoomed out, the layer panel says "zoom in". The API refuses a
+tiled layer without `bbox=`. `/tiles/{z}/{x}/{y}.mvt` serves the same rows as Mapbox vector tiles for a future
+client-side MVT renderer.
 
 ## Colour coding
 
@@ -60,7 +62,11 @@ table on both sides (`geo/precision.py`, `renderers/HaloLayer.ts`):
 | country | 600 km | country centroid, phone country code |
 
 Pins are allowed only for exact/rooftop/street. Everything else is a halo: the analyst sees uncertainty, not
-false confidence. The inspector warns explicitly on coarse placements.
+false confidence. The inspector warns explicitly on coarse placements. This holds inside `points`, `tracks`
+and `heat` layers too: `PrecisionSplitLayer` routes each feature by its `precision` (city-level Tor relays,
+country-level GDELT events and IP-geolocated hosts become halos), and coarse features at the same place share
+one halo whose `grouped` property counts them. `DbSink` writes `precision` and `geo_source` into every event,
+track and static feature's props for this; rows stored before that carry none and are treated as exact fixes.
 
 ## Geo-resolution pipeline
 
