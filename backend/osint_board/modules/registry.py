@@ -10,7 +10,7 @@ from functools import lru_cache
 from typing import TypeVar
 
 from osint_board.catalog import Catalog, ModuleSpec, load_catalog
-from osint_board.modules.base import BaseModule, ModuleContext, Scope
+from osint_board.modules.base import BaseModule, FeedModule, ModuleContext, Scope
 
 T = TypeVar("T", bound=type[BaseModule])
 
@@ -73,14 +73,22 @@ class Registry:
         return [i for i in self.all() if i.impl is not None]
 
     def feeds(self) -> list[ModuleInfo]:
-        return [i for i in self.implemented() if i.spec.mode == "feed"]
+        """Feed modules, plus lookups whose implementation also polls on a catalog cadence (``tor_exit_nodes``)."""
+        return [
+            i
+            for i in self.implemented()
+            if i.spec.mode == "feed" or (i.spec.cadence and i.impl is not None and issubclass(i.impl, FeedModule))
+        ]
 
     def for_input(self, entity_type: str, *, implemented_only: bool = True) -> list[ModuleInfo]:
-        return [
+        """Modules accepting ``entity_type``, ordered by catalog priority (high first) then id."""
+        rank = {"high": 0, "normal": 1, "low": 2}
+        found = [
             i
             for i in self.all()
             if entity_type in i.spec.consumes and (i.impl is not None or not implemented_only) and not i.spec.is_retired
         ]
+        return sorted(found, key=lambda i: (rank.get(i.spec.priority, 1), i.spec.id))
 
     def instantiate(self, module_id: str, *, scope: Scope | None = None, config: dict | None = None) -> BaseModule:
         info = self.get(module_id)

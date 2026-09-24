@@ -1,0 +1,1 @@
+{"total":1,"page":0,"results":[{"id":123,"repo":"https://github.com/someone/example-client","filename":"config.py","url":"https://searchcode.com/codesearch/view/123/","language":"Python","location":"/src","name":"config.py","lines":{"10":"API_HOST = 'api.example.com'","11":"SUPPORT = 'support@example.com'"}}]}

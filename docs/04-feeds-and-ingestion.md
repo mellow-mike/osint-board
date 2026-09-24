@@ -13,6 +13,10 @@ catalog, run by the singleton `osint-board feeds` process, and write to the glob
 - **Push feeds** (AIS WebSocket, ADS-B streams) run `stream()`; when it ends the runner reconnects with
   backoff.
 - `DbSink` upserts and publishes deltas; `MemorySink` is used by tests and `osint-board feeds --once <id>`.
+  Events go to `geo_events`, vessels/aircraft to `tracks` + `track_positions`, element sets to `satellites`,
+  and cell towers / Wi-Fi access points / Tor relays to `static_features` (upsert on `(layer, key)`).
+- A lookup module that also implements `FeedModule` and has a catalog `cadence` (`tor_exit_nodes`) is
+  scheduled like a feed; `cadence: on_demand` modules (`wigle`) never are.
 
 Backpressure: batches are written in one transaction; if the database is slow the async generator simply
 waits. Redis deltas are fire-and-forget.
@@ -38,14 +42,14 @@ waits. Redis deltas are fire-and-forget.
 | USGS | open | 1 min | `all_hour` default; `all_day` on startup to backfill; FDSN query service for history |
 | CelesTrak | open | daily | GP/TLE for group `active` (~10k objects); more groups configurable; poll gently |
 | NASA FIRMS | free MAP_KEY | 3 h | VIIRS SNPP/NOAA-20/NOAA-21 NRT world CSV, last 1 day; MODIS optional |
-| GDELT | open | 15 min | Events plus GKG CSV every 15 min; ActionGeo lat/lon with a precision code |
-| AISStream | free key | realtime | One WebSocket, world bbox; keep the latest per MMSI in Redis, positions in Timescale |
+| GDELT | open | 15 min | `lastupdate.txt` → zipped events export every 15 min; ActionGeo lat/lon with GDELT's precision code mapped to ours; rows without a location skipped; `min_mentions` filter; unchanged archives are not re-ingested |
+| AISStream | free key | realtime | One WebSocket subscription (world bbox, optional MMSI filter); position reports and static data both update the `maritime:<MMSI>` track; latest per MMSI in Redis, positions in Timescale |
 | OpenSky | account | 5–10 s | Credits-based; internal `adsb_network` service aggregates community feeds and own receivers |
 | ACLED | account | weekly | Free for non-commercial with registration; `conflict_events` builds an hourly open-source equivalent |
-| OpenCellID | free key | monthly | Full CSV dump (~40M rows) into `static_features` with COPY; API for spot queries |
+| OpenCellID | free key | monthly | `mode: diff` ingests yesterday's delta; `mode: full` streams the ~40M-row dump with flat memory into `static_features`; street precision only for well-sampled towers |
 | WiGLE | free account | on demand | Bounding-box searches for areas of interest; quota is small, so cache aggressively |
 | Windy / Saildrone | freemium | hourly | Replaced by Open-Meteo plus NOAA in `weather_service` |
-| Tor exit nodes | open | hourly | Exit list plus Onionoo details (with geo) for the `tor` layer |
+| Tor exit nodes | open | hourly | Onionoo `details` for running relays (city-level positions, halos) into `static_features`; the same module answers IP lookups from the bulk exit list |
 
 ## Volume expectations (steady state)
 

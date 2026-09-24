@@ -1,0 +1,1 @@
+{"facets":{},"hits":{"total":1,"hits":[{"repo":{"raw":"someone/example-client"},"path":{"raw":"src/config.py"},"branch":{"raw":"main"},"content":{"snippet":"<pre>API_HOST = \"api.<mark>example.com</mark>\"\nSUPPORT = \"support@example.com\"</pre>"}}]}}

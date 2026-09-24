@@ -1,0 +1,2 @@
+www.example.com
+cdn.example.net

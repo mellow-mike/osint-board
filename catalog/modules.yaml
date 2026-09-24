@@ -4008,7 +4008,12 @@ modules:
       - domain
       - hash
       - email
-    produces: *id045
+    produces:
+      - verdict
+      - hostname
+      - dns_record
+      - hash
+      - ip
     geo: derived
     layer: threat
     phase: 1
