@@ -1,0 +1,8 @@
+# Minimal SearXNG settings for the meta_search service. JSON output must be enabled for the API.
+use_default_settings: true
+server:
+  secret_key: "change-me-in-production"
+  limiter: false
+search:
+  formats: [html, json]
+  safe_search: 0

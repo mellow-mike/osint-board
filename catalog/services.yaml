@@ -1,0 +1,325 @@
+# Internal services that replace tiered / commercial APIs (and retired free ones).
+# The `replacement` field of a module in modules.yaml points at one or more of these ids.
+# `scripts/catalog.py docs` computes the reverse mapping (which modules each service replaces).
+#
+# effort: S (days) | M (weeks) | L (a quarter) | XL (multi-quarter, needs infrastructure)
+version: 1
+services:
+  - id: local_reimpl
+    name: In-process reimplementation
+    summary: Modules whose 'tiered' label was wrong or whose logic is trivial (a DNS query, a free list). Reimplemented directly as internal modules, no service needed.
+    data_sources: [EasyList, public DNS resolvers, GLEIF API, StackExchange API]
+    method: Direct implementation inside the module.
+    freshness: n/a
+    density: n/a
+    exceeds_by: No quota, no key management.
+    effort: S
+    phase: 1
+
+  - id: geoip
+    name: IP geolocation service
+    summary: One authoritative IP → location/ASN/org answer with a confidence and precision, replacing nine geolocation vendors.
+    data_sources:
+      - MaxMind GeoLite2 City/ASN (free with account, weekly)
+      - DB-IP Lite (CC BY, monthly)
+      - IPinfo Lite country/ASN (free, daily)
+      - RIR delegated-extended files + RDAP org addresses (daily)
+      - Reverse-DNS location hints (airport codes / city names in PTR records)
+      - RIPE Atlas / RIPE IPmap latency measurements for high-value prefixes
+      - Anycast detection (multi-vantage latency)
+      - Our own scanner observations (see scanner)
+    method: Merge sources per prefix with a weighted vote; keep provenance; expose precision (exact/city/region/country) and a confidence score; store history so an IP's location can be queried "as of" a date.
+    freshness: Daily merge; hourly for prefixes touched by investigations.
+    density: Every routed prefix (~1.2M IPv4 + IPv6 prefixes).
+    exceeds_by: Vendors give one answer with no provenance; we give a fused answer, disagreement flags, precision, history, and unlimited throughput with no per-query cost.
+    effort: M
+    depends_on: []
+    phase: 3
+
+  - id: threat_lists
+    name: Free threat-list aggregator
+    summary: Ingests every free blocklist / DNSBL / IOC feed in the catalog into one indicator table with source, first/last seen and TTL.
+    data_sources: [abuse.ch feeds, blocklist.de, CINS, Emerging Threats, Greensnow, SANS ISC, OpenPhish, PhishStats, PhishTank, ThreatFox, VXVault, botvrij, CoinBlocker, Steven Black, Tor exits, multiproxy, CleanTalk, VoIPBL, DNSBLs (Spamhaus, SpamCop, UCEPROTECT, SURBL, DroneBL), OTX pulses, MISP feeds]
+    method: Scheduled fetchers with content hashing (only re-index on change), normalisation to ip/netblock/domain/url/hash, per-source reliability weights.
+    freshness: 5 minutes to 24 hours, per feed.
+    density: Millions of indicators.
+    exceeds_by: One query answers "who lists this" across ~40 sources; feeds are cached locally so lookups are instant and never rate-limited.
+    effort: M
+    depends_on: []
+    phase: 1
+
+  - id: threat_scoring
+    name: Threat scoring & noise classification
+    summary: Ensemble reputation for IPs, domains, URLs and hashes that replaces AbuseIPDB, IPQualityScore, GreyNoise, VirusTotal-as-verdict, etc.
+    data_sources: [threat_lists, own honeypot / sensor network (GreyNoise-style internet background noise), scanner observations, passive DNS, certificate anomalies, WHOIS age, anonymiser exit enumeration (VPN/proxy/Tor), user custom feeds]
+    method: Weighted ensemble with per-source precision learned from overlap; explains every score with the contributing evidence; "noise" classification from sensor hits (mass scanner vs targeted); anonymiser attribution from published VPN ranges and active exit enumeration.
+    freshness: Continuous.
+    density: Any IP/domain/URL/hash, precomputed for everything in threat_lists.
+    exceeds_by: Explainable scores with evidence, no per-lookup quota, private (queries never leave the deployment), and custom feeds carry equal weight.
+    effort: L
+    depends_on: [threat_lists, scanner, pdns]
+    phase: 3
+
+  - id: scanner
+    name: Internet scanning platform
+    summary: Targeted on-demand scanning (ports, banners, TLS, HTTP fingerprints, vulns) with an optional continuous internet-wide mode, replacing Shodan / Censys / BinaryEdge / Onyphe for the assets you care about.
+    data_sources: [own masscan/zmap + zgrab2-style banner grabbers, nmap/nuclei/testssl wrappers (tools image), LeakIX (free), Censys free tier for spot checks]
+    method: Two tiers. (a) On-demand — everything in an investigation's authorised scope is scanned on a schedule you choose (hours, not weeks). (b) Continuous — optional, dedicated egress IPs, published abuse contact, opt-out list, conservative rate limits; stores service banners, TLS certs, HTTP titles/favicons/tech.
+    freshness: "On-demand tier: minutes to hours. Continuous tier: full IPv4 sweep of the top ports in ~a week per port set."
+    density: Complete for authorised scope; sampled for the internet at large.
+    exceeds_by: Far fresher than any vendor for targets that matter; raw evidence retained; legal posture is explicit and controllable.
+    effort: XL
+    depends_on: []
+    phase: 3
+
+  - id: pdns
+    name: Passive DNS & certificate history
+    summary: Historical DNS, subdomain and certificate index replacing SecurityTrails, DNSDB, RiskIQ, Zetalytics, CertSpotter and ZoneFile.io.
+    data_sources: [own resolver sensors, CT log tailing (all logs, certstream-style), ICANN CZDS zone files (free with approved account, daily), CommonCrawl host index, free PDNS APIs (CIRCL, Mnemonic, Robtex, HackerTarget), scanner TLS SANs, web spider link graph]
+    method: Append-only rrname/rrtype/rdata observations with first/last seen in TimescaleDB; certificate SAN index; daily zone-file diffs for new/dropped domains; reverse indexes (rdata → rrname, SAN → cert).
+    freshness: CT within minutes; zone files daily; resolver sensors continuous.
+    density: All gTLD zones (~200M domains) plus every name seen in CT.
+    exceeds_by: Newly registered / newly certified domains show within minutes, unlimited queries, reverse lookups on any field.
+    effort: L
+    depends_on: []
+    phase: 3
+
+  - id: whois_archive
+    name: WHOIS / RDAP archive & reverse WHOIS
+    summary: Historical WHOIS with reverse lookup by registrant e-mail / org / name server, replacing Whoxy, Whoisology, JsonWHOIS, ViewDNS and the WHOIS half of SecurityTrails.
+    data_sources: [RDAP (all RIRs and gTLD registries), legacy WHOIS port 43, CZDS zone-file deltas as the "what to look up" driver, RIR bulk data]
+    method: Every domain the platform sees is RDAP-queried on first sight and re-queried on a decay schedule; diffs stored; reverse indexes built on normalised contact fields; redaction-aware (post-GDPR data is mostly redacted, so name servers, registrar and dates carry the pivots).
+    freshness: New domains within a day of registration (via CZDS); refresh cadence by domain age.
+    density: Everything seen; full coverage of gTLDs over time.
+    exceeds_by: Unlimited reverse queries, full history, no per-record cost.
+    effort: M
+    depends_on: [pdns]
+    phase: 3
+
+  - id: subdomain_engine
+    name: Subdomain discovery
+    summary: Aggregates every passive source plus active brute force and permutation into one ranked hostname set, replacing Chaos, Google/Bing enumeration, FullHunt and SecurityTrails subdomains.
+    data_sources: [pdns, CT, CZDS, CommonCrawl, urlscan, Wayback, GitHub code search, DNS brute-force wordlists, permutation engine, zone transfer attempts, TLS SAN harvesting]
+    method: Fan-out to all sources, resolve everything (wildcard-aware), keep provenance and liveness.
+    freshness: On demand (minutes) plus scheduled re-enumeration for monitored domains.
+    density: Typically exceeds any single vendor because it is the union.
+    exceeds_by: Union of sources with liveness and takeover checks built in.
+    effort: M
+    depends_on: [pdns]
+    phase: 3
+
+  - id: meta_search
+    name: Meta search & crawl
+    summary: Self-hosted SearXNG aggregating 70+ engines plus our own crawler, replacing Google CSE and the retired Bing APIs.
+    data_sources: [SearXNG (self-hosted), DuckDuckGo, CommonCrawl index, own web spider, Wayback]
+    method: SearXNG behind a result cache; dorking templates per entity type (site:, inurl:, filetype:); results normalised to url/hostname/description; crawler enriches.
+    freshness: Live.
+    density: Union of engines.
+    exceeds_by: No quota, engine diversity, privacy (queries go through our instance).
+    effort: S
+    depends_on: []
+    phase: 3
+
+  - id: email_intel
+    name: E-mail intelligence
+    summary: Discovery, pattern inference, verification and reputation replacing Hunter, Snov, EmailRep, Clearbit, FullContact, Debounce, NameAPI, EmailCrawlr, Trumail and Seon's e-mail half.
+    data_sources: [own crawls, GitHub commits, PGP key servers, Gravatar, breach_corpus, MX/SPF/DMARC records, disposable-domain lists (open source), SMTP probing (RCPT TO, rate-limited, opt-in)]
+    method: Pattern inference from observed addresses; verification ladder (syntax → MX → disposable → catch-all detection → SMTP); reputation from breach presence, age and profile links.
+    freshness: Live.
+    density: Depends on public footprint; matches vendors for domains with any web presence.
+    exceeds_by: Verification is deterministic and explainable; no per-lookup credits.
+    effort: M
+    depends_on: [meta_search, breach_corpus]
+    phase: 3
+
+  - id: phone_intel
+    name: Phone intelligence
+    summary: Offline validation, region, line type and carrier, plus OSINT enrichment, replacing numverify, NeutrinoAPI, TextMagic, Twilio Lookup and AbstractAPI phone.
+    data_sources: [libphonenumber (validity, region, type, carrier prefix data), number-portability datasets where public, meta_search, social_engine]
+    method: libphonenumber first (covers ~all of numverify offline); carrier/caller-name from public sources and search.
+    freshness: libphonenumber metadata updates monthly.
+    density: Global.
+    exceeds_by: Offline, instant, no quota; enrichment adds profile pivots vendors lack.
+    effort: S
+    depends_on: [meta_search, social_engine]
+    phase: 3
+
+  - id: company_intel
+    name: Company intelligence
+    summary: Registry aggregation replacing OpenCorporates, Clearbit/FullContact company data and GLEIF-as-tiered.
+    data_sources: [GLEIF (free), SEC EDGAR (free), UK Companies House (free API), OpenCorporates free tier where licensed, national registries with open data (e.g. France INPI, Germany Handelsregister scraping), Wikidata]
+    method: Name normalisation and entity resolution across registries; officers and addresses geocoded via geocoder.
+    freshness: Registry publication cadence (daily for EDGAR/Companies House).
+    density: Strong for US/UK/EU listed and registered entities.
+    exceeds_by: Free, linked to LEI, geocoded on the globe.
+    effort: M
+    depends_on: [geocoder]
+    phase: 3
+
+  - id: tech_fingerprint
+    name: Web technology fingerprinting
+    summary: Replaces BuiltWith, WhatCMS, Host.io tech data and SpyOnWeb analytics pivots.
+    data_sources: [webappanalyzer fingerprints, WhatWeb, CMSeeK, WAFW00F, Retire.js (tools image), own crawler, CommonCrawl for analytics-ID indexing]
+    method: Run fingerprinters on crawled pages; index analytics/adsense/tag-manager IDs across all crawled and CommonCrawl pages for reverse pivots.
+    freshness: On demand; CommonCrawl monthly.
+    density: Anything we crawl; reverse analytics index over CommonCrawl (~3B pages).
+    exceeds_by: Reverse analytics-ID pivots at web scale; no quota.
+    effort: M
+    depends_on: [meta_search]
+    phase: 3
+
+  - id: social_engine
+    name: Social & username engine
+    summary: Username enumeration and profile extraction (500+ sites) replacing Social Links, Seon's social half, Twitter API and FullContact person data.
+    data_sources: [own site manifest (Sherlock/Maigret compatible), per-site adapters for profile parsing, meta_search, Keybase, Gravatar]
+    method: Concurrent existence checks with per-site detectors; adapters extract name, bio, location, links; location text geocoded at 'city' precision.
+    freshness: Live.
+    density: 500+ platforms.
+    exceeds_by: Transparent (you see the evidence), extensible manifest, no per-seat licence.
+    effort: L
+    depends_on: [meta_search, geocoder]
+    phase: 3
+
+  - id: darkweb_crawler
+    name: Dark-web crawler & onion index
+    summary: Own Tor crawler and index replacing IntelligenceX / Social Links dark-web coverage and the retired onion search proxies.
+    data_sources: [Ahmia (free), TORCH / onionsearchengine where reachable, own Tor crawler seeded from those, onion link directories]
+    method: Tor-only crawler with politeness and content hashing; full-text index in Meilisearch; alerting on investigation keywords.
+    freshness: Continuous crawl.
+    density: Grows with crawl budget.
+    exceeds_by: Private index, keyword alerting, evidence snapshots.
+    effort: L
+    depends_on: []
+    phase: 4
+
+  - id: paste_monitor
+    name: Paste monitoring
+    summary: Replaces PasteBin-via-Google, Trashpanda and IntelligenceX pastes.
+    data_sources: [Pastebin scraping API (paid Pro) or public scraping at low rate, psbdmp, GitHub gists, dpaste/other paste sites, Telegram public channels (optional)]
+    method: Continuous tail of new pastes, indicator extraction, keyword alerts.
+    freshness: Minutes.
+    density: All monitored sites.
+    exceeds_by: Real-time alerts against investigation keywords.
+    effort: M
+    depends_on: []
+    phase: 3
+
+  - id: breach_corpus
+    name: Breach corpus
+    summary: Legally sourced breach index replacing Dehashed, HIBP-as-paid and Leak-Lookup where allowed.
+    data_sources: [HIBP domain search (free for verified domains), HIBP Pwned Passwords (free, k-anonymity), publicly published breach notifications, user-supplied datasets the operator is licensed to hold]
+    method: Hash-only storage for credentials, normalised e-mail/username index, provenance per record.
+    freshness: On ingest.
+    density: Depends entirely on lawfully obtainable data — documented limitation.
+    exceeds_by: Only within the operator's legal remit; does not attempt to mirror grey-market corpora.
+    effort: M
+    depends_on: []
+    phase: 4
+
+  - id: ai_analyst
+    name: AI analyst (RAG)
+    summary: Retrieval-augmented briefings and enrichment replacing Perplexity Sonar.
+    data_sources: [meta_search, own entity index, crawled content, GDELT DOC API]
+    method: Retrieval over our indexes and live meta search, then a pluggable LLM (local by default via Ollama/vLLM; hosted providers optional) produces cited briefings; citations are enforced and every claim links to a stored snapshot.
+    freshness: Live.
+    density: n/a
+    exceeds_by: Cites our own evidence store; private by default; can run fully offline.
+    effort: M
+    depends_on: [meta_search]
+    phase: 4
+
+  - id: conflict_events
+    name: Conflict event pipeline
+    summary: ACLED-equivalent event stream from open sources.
+    data_sources: [GDELT Events/GKG (15 min), UCDP GED (free), ReliefWeb API (free), Wikipedia current events, own NLP geocoding of news]
+    method: Classify GDELT CAMEO codes into ACLED-style event types, cluster duplicate reports, geocode with precision codes, attach fatalities where reported.
+    freshness: Hourly (ACLED is weekly).
+    density: Higher raw volume than ACLED; lower curation — expose confidence.
+    exceeds_by: Frequency; ACLED remains better curated, so keep it when licensed and show both.
+    effort: M
+    depends_on: []
+    phase: 3
+
+  - id: adsb_network
+    name: ADS-B aggregation
+    summary: Aircraft positions from community aggregators and own receivers, replacing OpenSky's rate-limited API.
+    data_sources: [adsb.lol, adsb.fi, airplanes.live, ADSB.one (community, free, no key), OpenSky anonymous/registered, own RTL-SDR feeders (readsb + tar1090 → our ingest)]
+    method: Merge by ICAO24 with source preference and timestamp; MLAT-derived positions flagged; military/blocked hex handling per feed policy.
+    freshness: 1–5 seconds.
+    density: Global where community coverage exists; own receivers fill gaps.
+    exceeds_by: Update rate and no credit budget.
+    effort: M
+    depends_on: []
+    phase: 3
+
+  - id: weather_service
+    name: Weather & ocean observations
+    summary: Replaces Windy/Saildrone.
+    data_sources: [Open-Meteo (free, no key), NOAA GFS GRIB2 (free), NOAA NDBC buoys, Argo floats (GDAC), METAR/TAF (aviationweather.gov)]
+    method: Hourly ingestion of observations; forecasts on demand per point; wind/pressure raster overlays optional.
+    freshness: Hourly (observations), 6-hourly model runs.
+    density: Global model grid + thousands of stations/buoys.
+    exceeds_by: Free, global, includes ocean in-situ data Saildrone would not expose anyway.
+    effort: S
+    depends_on: []
+    phase: 3
+
+  - id: geocoder
+    name: Geocoder
+    summary: Self-hosted forward/reverse geocoding replacing Google Maps and the public Nominatim rate limits.
+    data_sources: [OpenStreetMap planet or regional extracts (Nominatim / Photon), Who's On First, GeoNames]
+    method: Photon for fast fuzzy forward geocoding, Nominatim for structured/reverse; results carry precision (rooftop/street/city/region/country).
+    freshness: Monthly OSM refresh.
+    density: Global.
+    exceeds_by: Unlimited, private, precision-aware.
+    effort: M
+    depends_on: []
+    phase: 3
+
+  - id: app_intel
+    name: App & extension intelligence
+    summary: Replaces Koodous and the retired CRXcavator.
+    data_sources: [Apple iTunes Search API (free), Google Play scraping, Chrome Web Store / Firefox AMO search, APK mirrors for hashes]
+    method: Search by developer/domain/company; extract permissions and embedded domains where packages are obtainable.
+    freshness: On demand.
+    density: Store search coverage.
+    exceeds_by: Cross-store in one query.
+    effort: S
+    depends_on: []
+    phase: 3
+
+  - id: crypto_intel
+    name: Crypto intelligence
+    summary: Replaces Bitcoin Who's Who and the pre-merger BitcoinAbuse API.
+    data_sources: [blockchain.com / mempool.space (free), Etherscan (free key), Chainabuse public reports, OFAC SDN crypto addresses, scam-report lists]
+    method: Balance/tx lookups plus an abuse-report aggregator; clustering left to future work.
+    freshness: Live for chain data; daily for lists.
+    density: All public reports.
+    exceeds_by: Sanctions list integration.
+    effort: S
+    depends_on: []
+    phase: 3
+
+  - id: bucket_hunter
+    name: Cloud storage enumeration
+    summary: Replaces Grayhat Warfare with our own permutation-based bucket discovery across providers.
+    data_sources: [S3, Azure Blob, GCS, DigitalOcean Spaces, Backblaze B2, Alibaba OSS name-space probes]
+    method: Keyword permutations from company/domain, concurrent existence + listing checks, respects provider rate limits.
+    freshness: On demand.
+    density: Anything reachable by name permutation.
+    exceeds_by: Provider coverage; results never leave the deployment.
+    effort: S
+    depends_on: []
+    phase: 3
+
+  - id: p2p_monitor
+    name: P2P activity observer
+    summary: Replaces iknowwhatyoudownload.
+    data_sources: [BitTorrent DHT crawler, tracker scrapes for public torrents]
+    method: Passive DHT participation to observe info-hash announcements per IP; store hashed observations with retention limits.
+    freshness: Continuous.
+    density: Proportional to DHT vantage points.
+    exceeds_by: Private; retention under operator control. Legal review required before enabling.
+    effort: M
+    depends_on: []
+    phase: 4

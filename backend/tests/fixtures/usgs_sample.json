@@ -1,0 +1,7 @@
+{"type":"FeatureCollection","metadata":{"generated":1758700000000,"title":"USGS All Earthquakes, Past Hour","count":2},
+ "features":[
+  {"type":"Feature","properties":{"mag":4.6,"place":"120 km SSE of Kodiak, Alaska","time":1758699000000,"updated":1758699500000,"url":"https://earthquake.usgs.gov/earthquakes/eventpage/ak0251abcd","tsunami":0,"magType":"ml","status":"reviewed","title":"M 4.6 - 120 km SSE of Kodiak, Alaska"},
+   "geometry":{"type":"Point","coordinates":[-151.9,56.7,35.2]},"id":"ak0251abcd"},
+  {"type":"Feature","properties":{"mag":1.2,"place":"7 km NW of The Geysers, CA","time":1758698000000,"updated":1758698100000,"url":"https://earthquake.usgs.gov/earthquakes/eventpage/nc75000001","tsunami":0,"magType":"md","status":"automatic","title":"M 1.2 - 7 km NW of The Geysers, CA"},
+   "geometry":{"type":"Point","coordinates":[-122.8,38.8,2.1]},"id":"nc75000001"}
+ ]}

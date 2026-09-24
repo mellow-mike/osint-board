@@ -1,0 +1,166 @@
+# OSINT Board — self-hosted stack.
+#
+#   cp .env.example .env            # fill in keys you have; everything runs without them
+#   docker compose up -d            # core: db, redis, meilisearch, api, worker, feeds, web
+#   docker compose --profile tools up -d          # + external tool runner (nmap, nuclei, ...)
+#   docker compose --profile replacements up -d   # + SearXNG (meta search) and Photon (geocoder)
+#
+# See docs/08-deployment.md for cloud deployment (Helm chart under deploy/helm).
+name: osint-board
+
+x-backend: &backend
+  build:
+    context: .
+    dockerfile: deploy/docker/backend.Dockerfile
+  env_file: .env
+  environment:
+    OSINT_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-osint}:${POSTGRES_PASSWORD:-osint}@db:5432/${POSTGRES_DB:-osint}
+    OSINT_REDIS_URL: redis://redis:6379/0
+    OSINT_MEILI_URL: http://meilisearch:7700
+    OSINT_MEILI_KEY: ${MEILI_MASTER_KEY:-osint-dev-master-key}
+    OSINT_CATALOG_DIR: /app/catalog
+    OSINT_LOG_JSON: "true"
+  depends_on:
+    db: { condition: service_healthy }
+    redis: { condition: service_healthy }
+    meilisearch: { condition: service_healthy }
+  restart: unless-stopped
+
+services:
+  db:
+    # PostgreSQL 16 + PostGIS + TimescaleDB in one image (Timescale's HA build ships PostGIS).
+    image: timescale/timescaledb-ha:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-osint}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-osint}
+      POSTGRES_DB: ${POSTGRES_DB:-osint}
+    volumes:
+      - pgdata:/home/postgres/pgdata/data
+      - ./deploy/docker/initdb:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-osint} -d ${POSTGRES_DB:-osint}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "no", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.12
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-osint-dev-master-key}
+      MEILI_ENV: production
+      MEILI_NO_ANALYTICS: "true"
+    volumes:
+      - meilidata:/meili_data
+    ports:
+      - "127.0.0.1:${MEILI_PORT:-7700}:7700"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:7700/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    <<: *backend
+    command: ["osint-board", "api"]
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    <<: *backend
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+
+  worker:
+    <<: *backend
+    command: ["osint-board", "worker"]
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      meilisearch: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+
+  feeds:
+    <<: *backend
+    command: ["osint-board", "feeds"]
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+
+  web:
+    build:
+      context: .
+      dockerfile: deploy/docker/frontend.Dockerfile
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # ---- optional profiles ----------------------------------------------------------------------
+  tools:
+    profiles: ["tools"]
+    build:
+      context: .
+      dockerfile: deploy/docker/tools.Dockerfile
+    env_file: .env
+    environment:
+      OSINT_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-osint}:${POSTGRES_PASSWORD:-osint}@db:5432/${POSTGRES_DB:-osint}
+      OSINT_REDIS_URL: redis://redis:6379/0
+      OSINT_CATALOG_DIR: /app/catalog
+    command: ["osint-board", "worker", "--queue", "tools"]
+    cap_add: ["NET_RAW", "NET_ADMIN"]   # nmap SYN scans; drop if you only run passive modules
+    depends_on:
+      redis: { condition: service_healthy }
+    restart: unless-stopped
+
+  searxng:
+    profiles: ["replacements"]
+    image: searxng/searxng:latest
+    environment:
+      SEARXNG_BASE_URL: http://searxng:8080/
+    volumes:
+      - ./deploy/searxng:/etc/searxng:rw
+    restart: unless-stopped
+
+  photon:
+    # Forward geocoder for the geocoder service; needs a pre-built index volume (see docs/08-deployment.md).
+    profiles: ["replacements"]
+    image: rtuszik/photon-docker:latest
+    environment:
+      COUNTRY_CODE: ${PHOTON_COUNTRY_CODE:-}
+    volumes:
+      - photondata:/photon/photon_data
+    restart: unless-stopped
+
+  tor:
+    profiles: ["replacements"]
+    image: dperson/torproxy:latest
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  meilidata:
+  photondata:

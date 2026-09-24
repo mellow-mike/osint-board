@@ -1,0 +1,6 @@
+apiVersion: v2
+name: osint-board
+description: OSINT Board — globe, module runner, feeds and search (cloud deployment)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

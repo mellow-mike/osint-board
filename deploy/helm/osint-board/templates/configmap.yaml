@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "osint.name" . }}-config
+  labels: {{- include "osint.labels" . | nindent 4 }}
+data:
+  OSINT_CATALOG_DIR: /app/catalog
+{{- range $k, $v := .Values.config }}
+  {{ $k }}: {{ $v | quote }}
+{{- end }}

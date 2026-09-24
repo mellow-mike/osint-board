@@ -1,0 +1,4925 @@
+# OSINT Board module catalog — SOURCE OF TRUTH for every module in the platform.
+#
+# Generated once from catalog/osint-modules.csv and then hand-maintained. Validate with:
+#     python scripts/catalog.py validate
+# Regenerate docs/modules/CATALOG.md with:
+#     python scripts/catalog.py docs
+#
+# Field vocabulary (enforced by scripts/catalog.py and backend/osint_board/modules/manifest.py):
+#   source_type : free_api | tiered_api | commercial_api | internal | tool   (as classified in the CSV)
+#   category    : functional grouping (see docs/03-module-framework.md)
+#   mode        : lookup (target-driven) | feed (continuous global ingest) | extract (runs over collected content)
+#   access      : verified access model today —
+#                 open (no key) | key_free (free key) | freemium (free tier + paid) | paid | account (registration/approval)
+#                 | scrape (no API, HTML scraping) | local (runs in-process or as a local tool) | dead (endpoint gone)
+#   status      : active | verify (unconfirmed availability) | changed (still exists, access model changed) | defunct
+#   consumes    : entity types accepted as input   (backend/osint_board/entities/types.py)
+#   produces    : entity types emitted
+#   geo         : direct (emits coordinates) | derived (emits entities the geo pipeline can resolve) | none
+#   layer       : default globe layer for produced geo features (catalog/layers.yaml)
+#   phase       : 1 free APIs + core internals · 2 remaining internals + tools · 3 tiered replacements · 4 commercial replacements
+#   priority    : high | normal | low (ordering inside a phase)
+#   replacement : internal service ids (catalog/services.yaml) that replace this module; 'local_reimpl' = trivially reimplemented in-process
+#   cadence     : feed refresh cadence (realtime | 5s | 1m | 15m | hourly | 3h | daily | weekly | monthly | on_demand)
+#   requires_authorization : true when the module actively probes targets (must be in an authorized scope)
+
+version: 1
+modules:
+  - id: abstractapi
+    name: AbstractAPI
+    url: https://app.abstractapi.com/
+    description: Look up domain, phone and IP address information from AbstractAPI.
+    source_type: tiered_api
+    category: ip_geolocation
+    mode: lookup
+    access: freemium
+    status: active
+    consumes:
+      - ip
+      - domain
+      - phone
+      - email
+    produces:
+      - geo_point
+      - asn
+      - company
+      - phone_info
+      - email_verdict
+    geo: direct
+    layer: infrastructure
+    phase: 3
+    priority: normal
+    replacement:
+      - geoip
+      - phone_intel
+      - email_intel
+      - company_intel
+  - id: abuse_ch
+    name: abuse.ch
+    url: https://www.abuse.ch
+    description: Check if a host/domain, IP address or netblock is malicious according to Abuse.ch.
+    source_type: free_api
+    category: ip_reputation
+    mode: lookup
+    access: key_free
+    status: active
+    consumes:
+      - ip
+      - netblock
+      - domain
+      - hostname
+      - url
+      - hash
+    produces:
+      - verdict
+      - hash
+      - url
+    geo: derived
+    layer: threat
+    phase: 1
+    priority: high
+    replacement: &id001 []
+    notes: >-
+      Covers URLhaus, Feodo Tracker, SSL Blacklist and MalwareBazaar. abuse.ch requires a free Auth-Key for API calls since
+      2025; bulk feed downloads remain open and are the preferred ingestion path for the threat_lists aggregator.
+  - id: abuseipdb
+    name: AbuseIPDB
+    url: https://www.abuseipdb.com
+    description: Check if an IP address is malicious according to AbuseIPDB.com blacklist.
+    source_type: tiered_api
+    category: ip_reputation
+    mode: lookup
+    access: freemium
+    status: active
+    consumes: &id003
+      - ip
+      - netblock
+    produces:
+      - verdict
+      - reputation
+    geo: derived
+    layer: threat
+    phase: 3
+    priority: normal
+    replacement:
+      - threat_scoring
+    notes: 'Free key: 1,000 checks/day. Bulk blacklist export is also free at low volume.'
+  - id: abusix
+    name: Abusix Mail Intelligence
+    url: https://abusix.org/
+    description: Check if a netblock or IP address is in the Abusix Mail Intelligence blacklist.
+    source_type: tiered_api
+    category: spam_blocklist
+    mode: lookup
+    access: key_free
+    status: active
+    consumes: &id009
+      - ip
+      - netblock
+    produces: &id010
+      - verdict
+    geo: derived
+    layer: threat
+    phase: 3
+    priority: normal
+    replacement:
+      - threat_scoring
+    notes: DNSBL-style query with a free registered key.
+  - id: account_finder
+    name: Account Finder
+    url: null
+    description: >-
+      Look for possible associated accounts on over 500 social and other websites such as Instagram, Reddit, etc.
+    source_type: internal
+    category: social
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - username
+      - email
+    produces:
+      - social_profile
+      - url
+    geo: derived
+    layer: social
+    phase: 2
+    priority: high
+    replacement: *id001
+    notes: >-
+      Internal build: maintained site manifest (500+ sites, Sherlock/Maigret-compatible JSON), concurrent probing with per-site
+      detectors, rate limiting and proxy rotation. Feeds social_engine.
+  - id: acled
+    name: ACLED
+    url: https://acleddata.com/
+    description: >-
+      Obtain armed conflict events and fatalities from the Armed Conflict Location & Event Data Project, updated weekly.
+    source_type: tiered_api
+    category: geo_feed
+    mode: feed
+    access: account
+    status: active
+    consumes: &id002 []
+    produces:
+      - conflict_event
+    geo: direct
+    layer: conflict
+    phase: 3
+    priority: high
+    replacement:
+      - conflict_events
+    cadence: weekly
+    notes: >-
+      Free for registered non-commercial/academic use; paid otherwise. Replacement pipeline builds an equivalent event stream
+      from GDELT, UCDP GED and ReliefWeb with NLP geocoding, refreshed hourly instead of weekly.
+  - id: adblock_check
+    name: AdBlock Check
+    url: https://adblockplus.org/
+    description: Check if linked pages would be blocked by AdBlock Plus.
+    source_type: tiered_api
+    category: web_tech
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - url
+    produces:
+      - verdict
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement:
+      - local_reimpl
+    notes: >-
+      No third-party API needed: EasyList/EasyPrivacy filter lists are freely downloadable. Implement with a filter-list matcher
+      (adblock-rs bindings) and refresh lists daily.
+  - id: adguard_dns
+    name: AdGuard DNS
+    url: https://adguard.com/
+    description: Check if a host would be blocked by AdGuard DNS.
+    source_type: free_api
+    category: dns_filter
+    mode: lookup
+    access: open
+    status: active
+    consumes: &id007
+      - hostname
+      - domain
+    produces: &id008
+      - verdict
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: ahmia
+    name: Ahmia
+    url: https://ahmia.fi/
+    description: Search Tor 'Ahmia' search engine for mentions of the target.
+    source_type: free_api
+    category: dark_web
+    mode: lookup
+    access: open
+    status: active
+    consumes:
+      - domain
+      - email
+      - username
+      - keyword
+    produces: &id038
+      - darkweb_mention
+      - url
+    geo: none
+    layer: null
+    phase: 1
+    priority: high
+    replacement: *id001
+  - id: aisstream
+    name: AISStream
+    url: https://aisstream.io/
+    description: Obtain real-time vessel tracking (AIS maritime) data via AISStream's WebSocket API.
+    source_type: free_api
+    category: geo_feed
+    mode: feed
+    access: key_free
+    status: active
+    consumes: *id002
+    produces:
+      - vessel
+      - position
+    geo: direct
+    layer: maritime
+    phase: 1
+    priority: high
+    replacement: *id001
+    cadence: realtime
+    notes: >-
+      WebSocket stream of global AIS (terrestrial network). Free key. Subscribe with a world bounding box; de-duplicate by
+      MMSI; keep latest position in Redis and history in the positions hypertable.
+  - id: alienvault_iprep
+    name: AlienVault IP Reputation
+    url: https://cybersecurity.att.com/
+    description: Check if an IP or netblock is malicious according to the AlienVault IP Reputation database.
+    source_type: free_api
+    category: ip_reputation
+    mode: lookup
+    access: open
+    status: verify
+    consumes: *id003
+    produces: &id006
+      - verdict
+    geo: derived
+    layer: threat
+    phase: 1
+    priority: normal
+    replacement: *id001
+    notes: >-
+      The legacy reputation.alienvault.com feed appears retired; verify availability, otherwise fold into OTX pulses.
+  - id: alienvault_otx
+    name: AlienVault OTX
+    url: https://otx.alienvault.com/
+    description: Obtain information from AlienVault Open Threat Exchange (OTX)
+    source_type: tiered_api
+    category: threat_intel_platform
+    mode: lookup
+    access: key_free
+    status: active
+    consumes:
+      - ip
+      - domain
+      - hostname
+      - url
+      - hash
+      - email
+    produces:
+      - verdict
+      - threat_report
+      - dns_record
+      - hostname
+      - hash
+    geo: derived
+    layer: threat
+    phase: 3
+    priority: high
+    replacement:
+      - threat_scoring
+    notes: Free API key with generous limits; keep as a first-class source inside threat_scoring.
+  - id: apple_itunes
+    name: Apple iTunes
+    url: https://itunes.apple.com/
+    description: Search Apple iTunes for mobile apps.
+    source_type: free_api
+    category: app_stores
+    mode: lookup
+    access: open
+    status: active
+    consumes: &id019
+      - domain
+      - company
+    produces: &id030
+      - mobile_app
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+    notes: iTunes Search API, no key.
+  - id: archive_org
+    name: Archive.org
+    url: https://archive.org/
+    description: Identifies historic versions of interesting files/pages from the Wayback Machine.
+    source_type: free_api
+    category: web_archive
+    mode: lookup
+    access: open
+    status: active
+    consumes: &id012
+      - domain
+      - url
+    produces: &id013
+      - url
+      - hostname
+      - raw_content
+    geo: none
+    layer: null
+    phase: 1
+    priority: high
+    replacement: *id001
+    notes: Wayback CDX API for historical URLs; availability API for snapshots.
+  - id: arin
+    name: ARIN
+    url: https://www.arin.net/
+    description: Queries ARIN registry for contact information.
+    source_type: free_api
+    category: network_registry
+    mode: lookup
+    access: open
+    status: active
+    consumes:
+      - ip
+      - netblock
+      - asn
+      - email
+      - person
+      - company
+    produces:
+      - netblock
+      - asn
+      - company
+      - physical_address
+      - email
+      - person
+    geo: derived
+    layer: infrastructure
+    phase: 1
+    priority: high
+    replacement: *id001
+    notes: Whois-RWS / RDAP, no key.
+  - id: azure_blob_finder
+    name: Azure Blob Finder
+    url: https://azure.microsoft.com/en-in/services/storage/blobs/
+    description: Search for potential Azure blobs associated with the target and attempt to list their contents.
+    source_type: free_api
+    category: cloud_storage
+    mode: lookup
+    access: open
+    status: active
+    consumes: &id022
+      - domain
+      - company
+    produces: &id023
+      - cloud_bucket
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: base64_decoder
+    name: Base64 Decoder
+    url: null
+    description: Identify Base64-encoded strings in URLs, often revealing interesting hidden information.
+    source_type: internal
+    category: extractor
+    mode: extract
+    access: local
+    status: active
+    consumes:
+      - url
+      - raw_content
+    produces:
+      - base64_string
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+  - id: bgpview
+    name: BGPView
+    url: https://bgpview.io/
+    description: Obtain network information from BGPView API.
+    source_type: free_api
+    category: network_registry
+    mode: lookup
+    access: open
+    status: verify
+    consumes: &id043
+      - ip
+      - netblock
+      - asn
+    produces:
+      - asn
+      - netblock
+      - company
+      - ip
+    geo: derived
+    layer: infrastructure
+    phase: 1
+    priority: normal
+    replacement: *id001
+    notes: >-
+      Public API has been unstable at times; RIPEstat and bgp.tools are drop-in alternatives for the same data.
+  - id: binary_strings
+    name: Binary String Extractor
+    url: null
+    description: Attempt to identify strings in binary content.
+    source_type: internal
+    category: extractor
+    mode: extract
+    access: local
+    status: active
+    consumes:
+      - raw_file
+    produces:
+      - raw_content
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+  - id: binaryedge
+    name: BinaryEdge
+    url: https://www.binaryedge.io/
+    description: >-
+      Obtain information from BinaryEdge.io Internet scanning systems, including breaches, vulnerabilities, torrents and passive
+      DNS.
+    source_type: tiered_api
+    category: internet_scan
+    mode: lookup
+    access: paid
+    status: changed
+    consumes: &id031
+      - ip
+      - netblock
+      - domain
+      - hostname
+    produces:
+      - open_port
+      - software
+      - vulnerability
+      - breach_record
+      - dns_record
+      - hostname
+    geo: direct
+    layer: infrastructure
+    phase: 3
+    priority: normal
+    replacement:
+      - scanner
+      - pdns
+      - breach_corpus
+    notes: Acquired by Coalition; free plan discontinued.
+  - id: bing
+    name: Bing
+    url: https://www.bing.com/
+    description: Obtain information from bing to identify sub-domains and links.
+    source_type: tiered_api
+    category: search_engine
+    mode: lookup
+    access: dead
+    status: defunct
+    consumes: &id024
+      - domain
+    produces: &id025
+      - url
+      - hostname
+    geo: none
+    layer: null
+    phase: 3
+    priority: normal
+    replacement:
+      - meta_search
+      - subdomain_engine
+    notes: Microsoft retired the Bing Search APIs in August 2025.
+  - id: bing_shared_ips
+    name: Bing (Shared IPs)
+    url: https://www.bing.com/
+    description: Search Bing for hosts sharing the same IP.
+    source_type: tiered_api
+    category: search_engine
+    mode: lookup
+    access: dead
+    status: defunct
+    consumes:
+      - ip
+    produces:
+      - hostname
+    geo: none
+    layer: null
+    phase: 3
+    priority: normal
+    replacement:
+      - meta_search
+      - pdns
+    notes: Microsoft retired the Bing Search APIs in August 2025. Reverse-IP now comes from pdns + scanner.
+  - id: bitcoin_finder
+    name: Bitcoin Finder
+    url: null
+    description: Identify bitcoin addresses in scraped webpages.
+    source_type: internal
+    category: extractor
+    mode: extract
+    access: local
+    status: active
+    consumes: &id014
+      - raw_content
+    produces:
+      - btc_address
+    geo: none
+    layer: null
+    phase: 1
+    priority: high
+    replacement: *id001
+    notes: Base58Check + bech32 checksum validation to avoid false positives.
+  - id: bitcoin_whoswho
+    name: Bitcoin Who's Who
+    url: https://bitcoinwhoswho.com/
+    description: Check for Bitcoin addresses against the Bitcoin Who's Who database of suspect/malicious addresses.
+    source_type: tiered_api
+    category: crypto
+    mode: lookup
+    access: key_free
+    status: active
+    consumes: &id004
+      - btc_address
+    produces: &id005
+      - verdict
+    geo: none
+    layer: null
+    phase: 3
+    priority: normal
+    replacement:
+      - crypto_intel
+  - id: bitcoinabuse
+    name: BitcoinAbuse
+    url: https://www.bitcoinabuse.com/
+    description: Check Bitcoin addresses against the bitcoinabuse.com database of suspect/malicious addresses.
+    source_type: free_api
+    category: crypto
+    mode: lookup
+    access: key_free
+    status: changed
+    consumes: *id004
+    produces: *id005
+    geo: none
+    layer: null
+    phase: 3
+    priority: normal
+    replacement:
+      - crypto_intel
+    notes: Merged into Chainabuse (TRM Labs) in 2023; API endpoints differ from the original.
+  - id: blockchain_com
+    name: Blockchain
+    url: https://www.blockchain.com/
+    description: Queries blockchain.info to find the balance of identified bitcoin wallet addresses.
+    source_type: free_api
+    category: crypto
+    mode: lookup
+    access: open
+    status: active
+    consumes: *id004
+    produces:
+      - crypto_balance
+      - crypto_transaction
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: blocklist_de
+    name: blocklist.de
+    url: http://www.blocklist.de/en/index.html
+    description: Check if a netblock or IP is malicious according to blocklist.de.
+    source_type: free_api
+    category: ip_reputation
+    mode: lookup
+    access: open
+    status: active
+    consumes: *id003
+    produces: *id006
+    geo: derived
+    layer: threat
+    phase: 1
+    priority: high
+    replacement: *id001
+  - id: botscout
+    name: BotScout
+    url: https://botscout.com/
+    description: Searches BotScout.com's database of spam-bot IP addresses and e-mail addresses.
+    source_type: tiered_api
+    category: ip_reputation
+    mode: lookup
+    access: freemium
+    status: active
+    consumes:
+      - ip
+      - email
+    produces: *id006
+    geo: derived
+    layer: threat
+    phase: 3
+    priority: normal
+    replacement:
+      - threat_scoring
+      - email_intel
+  - id: botvrij
+    name: botvrij.eu
+    url: https://botvrij.eu/
+    description: Check if a domain is malicious according to botvrij.eu.
+    source_type: free_api
+    category: domain_reputation
+    mode: lookup
+    access: open
+    status: active
+    consumes:
+      - domain
+      - hostname
+    produces: &id011
+      - verdict
+    geo: derived
+    layer: threat
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: builtwith
+    name: BuiltWith
+    url: https://builtwith.com/
+    description: >-
+      Query BuiltWith.com's Domain API for information about your target's web technology stack, e-mail addresses and more.
+    source_type: tiered_api
+    category: web_tech
+    mode: lookup
+    access: paid
+    status: active
+    consumes:
+      - domain
+    produces:
+      - software
+      - email
+      - hostname
+    geo: none
+    layer: null
+    phase: 3
+    priority: normal
+    replacement:
+      - tech_fingerprint
+    notes: Free API is extremely limited; the paid tiers are what SpiderFoot targets.
+  - id: c99
+    name: C99
+    url: https://api.c99.nl/
+    description: Queries the C99 API which offers various data (geo location, proxy detection, phone lookup, etc).
+    source_type: commercial_api
+    category: ip_geolocation
+    mode: lookup
+    access: paid
+    status: active
+    consumes:
+      - ip
+      - phone
+      - domain
+    produces:
+      - geo_point
+      - verdict
+      - phone_info
+      - hostname
+    geo: direct
+    layer: infrastructure
+    phase: 4
+    priority: normal
+    replacement:
+      - geoip
+      - threat_scoring
+      - phone_intel
+      - subdomain_engine
+  - id: callername
+    name: CallerName
+    url: http://callername.com/
+    description: Lookup US phone number location and reputation information.
+    source_type: free_api
+    category: phone
+    mode: lookup
+    access: scrape
+    status: verify
+    consumes: &id036
+      - phone
+    produces: &id037
+      - phone_info
+      - country
+    geo: derived
+    layer: social
+    phase: 1
+    priority: normal
+    replacement: *id001
+    notes: US-only; HTML scraping, fragile.
+  - id: celestrak
+    name: CelesTrak
+    url: https://celestrak.org/
+    description: Obtain satellite TLE orbital element data from CelesTrak, updated daily.
+    source_type: free_api
+    category: geo_feed
+    mode: feed
+    access: open
+    status: active
+    consumes: *id002
+    produces:
+      - satellite
+    geo: direct
+    layer: space
+    phase: 1
+    priority: high
+    replacement: *id001
+    cadence: daily
+    notes: >-
+      GP/TLE element sets for ~10k+ tracked objects. Store elements; propagate with SGP4 client-side for smooth orbits and
+      server-side for queries. Also supports SupGP and CSV/JSON formats.
+  - id: censys
+    name: Censys
+    url: https://censys.io/
+    description: Obtain host information from Censys.io.
+    source_type: tiered_api
+    category: internet_scan
+    mode: lookup
+    access: freemium
+    status: active
+    consumes:
+      - ip
+      - domain
+      - hostname
+      - certificate
+    produces:
+      - open_port
+      - software
+      - certificate
+      - hostname
+      - geo_point
+    geo: direct
+    layer: infrastructure
+    phase: 3
+    priority: normal
+    replacement:
+      - scanner
+    notes: 'Free tier: 250 queries/month.'
+  - id: certspotter
+    name: CertSpotter
+    url: https://sslmate.com/certspotter/
+    description: Gather information about SSL certificates from SSLMate CertSpotter API.
+    source_type: tiered_api
+    category: certificates
+    mode: lookup
+    access: freemium
+    status: active
+    consumes: &id017
+      - domain
+      - hostname
+    produces: &id018
+      - certificate
+      - hostname
+    geo: none
+    layer: null
+    phase: 3
+    priority: normal
+    replacement:
+      - pdns
+  - id: chaos
+    name: ProjectDiscovery Chaos
+    url: https://chaos.projectdiscovery.io
+    description: Search for hosts/subdomains using chaos.projectdiscovery.io
+    source_type: commercial_api
+    category: subdomain_enum
+    mode: lookup
+    access: paid
+    status: active
+    consumes: &id015
+      - domain
+    produces: &id016
+      - hostname
+    geo: derived
+    layer: infrastructure
+    phase: 4
+    priority: normal
+    replacement:
+      - subdomain_engine
+    notes: Public bug-bounty dataset is downloadable without a key.
+  - id: cins_army
+    name: CINS Army List
+    url: https://cinsscore.com/
+    description: >-
+      Check if a netblock or IP address is malicious according to Collective Intelligence Network Security (CINS) Army list.
+    source_type: free_api
+    category: ip_reputation
+    mode: lookup
+    access: open
+    status: active
+    consumes: *id003
+    produces: *id006
+    geo: derived
+    layer: threat
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: circl_lu
+    name: CIRCL.LU
+    url: https://www.circl.lu/
+    description: Obtain information from CIRCL.LU's Passive DNS and Passive SSL databases.
+    source_type: free_api
+    category: passive_dns
+    mode: lookup
+    access: account
+    status: active
+    consumes:
+      - ip
+      - domain
+      - hostname
+      - certificate
+    produces:
+      - dns_record
+      - hostname
+      - ip
+      - certificate
+    geo: derived
+    layer: infrastructure
+    phase: 1
+    priority: high
+    replacement: *id001
+    notes: Free Passive DNS/SSL for security researchers; account required.
+  - id: cleanbrowsing
+    name: CleanBrowsing.org
+    url: https://cleanbrowsing.org/
+    description: Check if a host would be blocked by CleanBrowsing.org DNS content filters.
+    source_type: free_api
+    category: dns_filter
+    mode: lookup
+    access: open
+    status: active
+    consumes: *id007
+    produces: *id008
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: cleantalk
+    name: CleanTalk Spam List
+    url: https://cleantalk.org
+    description: Check if a netblock or IP address is on CleanTalk.org's spam IP list.
+    source_type: free_api
+    category: spam_blocklist
+    mode: lookup
+    access: open
+    status: active
+    consumes: *id009
+    produces: *id010
+    geo: derived
+    layer: threat
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: clearbit
+    name: Clearbit
+    url: https://clearbit.com/
+    description: Check for names, addresses, domains and more based on lookups of e-mail addresses on clearbit.com.
+    source_type: tiered_api
+    category: email
+    mode: lookup
+    access: dead
+    status: changed
+    consumes:
+      - email
+      - domain
+    produces:
+      - person
+      - company
+      - physical_address
+      - social_profile
+    geo: none
+    layer: null
+    phase: 3
+    priority: normal
+    replacement:
+      - email_intel
+      - company_intel
+    notes: Acquired by HubSpot; the self-serve enrichment API used here was discontinued.
+  - id: cloudflare_dns
+    name: CloudFlare DNS
+    url: https://www.cloudflare.com/
+    description: Check if a host would be blocked by CloudFlare DNS.
+    source_type: free_api
+    category: dns_filter
+    mode: lookup
+    access: open
+    status: active
+    consumes: *id007
+    produces: *id008
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+    notes: 1.1.1.2 (malware) and 1.1.1.3 (malware+adult) resolvers.
+  - id: coinblocker
+    name: CoinBlocker Lists
+    url: https://zerodot1.gitlab.io/CoinBlockerListsWeb/
+    description: Check if a domain appears on CoinBlocker lists.
+    source_type: free_api
+    category: domain_reputation
+    mode: lookup
+    access: open
+    status: active
+    consumes:
+      - domain
+      - hostname
+    produces: *id011
+    geo: derived
+    layer: threat
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: commoncrawl
+    name: CommonCrawl
+    url: http://commoncrawl.org/
+    description: Searches for URLs found through CommonCrawl.org.
+    source_type: free_api
+    category: web_archive
+    mode: lookup
+    access: open
+    status: active
+    consumes: *id012
+    produces: *id013
+    geo: none
+    layer: null
+    phase: 1
+    priority: high
+    replacement: *id001
+    notes: CDX index API; also bulk index files for offline use by pdns/subdomain_engine.
+  - id: comodo_dns
+    name: Comodo Secure DNS
+    url: https://www.comodo.com/secure-dns/
+    description: Check if a host would be blocked by Comodo Secure DNS.
+    source_type: tiered_api
+    category: dns_filter
+    mode: lookup
+    access: open
+    status: active
+    consumes: *id007
+    produces: *id008
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement:
+      - local_reimpl
+    notes: Plain DNS resolver query, no key required despite the 'tiered' label; reclassified as free.
+  - id: company_name_extractor
+    name: Company Name Extractor
+    url: null
+    description: Identify company names in any obtained data.
+    source_type: internal
+    category: extractor
+    mode: extract
+    access: local
+    status: active
+    consumes: *id014
+    produces:
+      - company
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+    notes: NER (spaCy) + legal-suffix heuristics.
+  - id: cookie_extractor
+    name: Cookie Extractor
+    url: null
+    description: Extract Cookies from HTTP headers.
+    source_type: internal
+    category: extractor
+    mode: extract
+    access: local
+    status: active
+    consumes:
+      - http_header
+    produces:
+      - cookie
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+  - id: country_extractor
+    name: Country Name Extractor
+    url: null
+    description: Identify country names in any obtained data.
+    source_type: internal
+    category: extractor
+    mode: extract
+    access: local
+    status: active
+    consumes:
+      - raw_content
+      - physical_address
+      - phone
+      - whois_record
+    produces:
+      - country
+    geo: direct
+    layer: investigation
+    phase: 1
+    priority: normal
+    replacement: *id001
+    notes: >-
+      Country entities resolve to a centroid at 'country' precision (rendered as a fuzzy halo, never a pin).
+  - id: credit_card_extractor
+    name: Credit Card Number Extractor
+    url: null
+    description: Identify Credit Card Numbers in any data
+    source_type: internal
+    category: extractor
+    mode: extract
+    access: local
+    status: active
+    consumes: *id014
+    produces:
+      - credit_card
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+    notes: Luhn-validated; values are stored masked.
+  - id: crobat
+    name: Crobat API
+    url: https://sonar.omnisint.io/
+    description: Search Crobat API for subdomains.
+    source_type: free_api
+    category: subdomain_enum
+    mode: lookup
+    access: dead
+    status: defunct
+    consumes: *id015
+    produces: *id016
+    geo: derived
+    layer: infrastructure
+    phase: 3
+    priority: normal
+    replacement:
+      - subdomain_engine
+    notes: sonar.omnisint.io was shut down.
+  - id: cross_referencer
+    name: Cross-Referencer
+    url: null
+    description: >-
+      Identify whether other domains are associated ('Affiliates') of the target by looking for links back to the target site(s).
+    source_type: internal
+    category: web_recon
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - url
+      - domain
+    produces:
+      - affiliate_link
+      - domain
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+  - id: crt_sh
+    name: Certificate Transparency
+    url: https://crt.sh/
+    description: Gather hostnames from historical certificates in crt.sh.
+    source_type: free_api
+    category: certificates
+    mode: lookup
+    access: open
+    status: active
+    consumes: *id017
+    produces: *id018
+    geo: none
+    layer: null
+    phase: 1
+    priority: high
+    replacement: *id001
+    notes: >-
+      crt.sh JSON output; heavy queries can time out. The pdns service ingests CT logs directly (certstream-style) instead
+      of polling crt.sh.
+  - id: crxcavator
+    name: CRXcavator
+    url: https://crxcavator.io/
+    description: Search CRXcavator for Chrome extensions.
+    source_type: free_api
+    category: app_stores
+    mode: lookup
+    access: dead
+    status: defunct
+    consumes: *id019
+    produces:
+      - browser_extension
+    geo: none
+    layer: null
+    phase: 3
+    priority: normal
+    replacement:
+      - app_intel
+    notes: Shut down by Duo in 2024. Replacement scrapes the Chrome Web Store / Firefox AMO search directly.
+  - id: custom_threat_feed
+    name: Custom Threat Feed
+    url: null
+    description: Check if a host/domain, netblock, ASN or IP is malicious according to your custom feed.
+    source_type: internal
+    category: custom
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - ip
+      - netblock
+      - asn
+      - domain
+      - hostname
+    produces:
+      - verdict
+    geo: derived
+    layer: threat
+    phase: 2
+    priority: high
+    replacement: *id001
+    notes: User-supplied lists (CSV/STIX/MISP) as first-class verdict sources.
+  - id: cybercrime_tracker
+    name: CyberCrime-Tracker.net
+    url: https://cybercrime-tracker.net/
+    description: Check if a host/domain or IP address is malicious according to CyberCrime-Tracker.net.
+    source_type: free_api
+    category: domain_reputation
+    mode: lookup
+    access: open
+    status: verify
+    consumes:
+      - ip
+      - hostname
+      - domain
+    produces: *id011
+    geo: derived
+    layer: threat
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: debounce
+    name: Debounce
+    url: https://debounce.io/
+    description: Check whether an email is disposable
+    source_type: free_api
+    category: email
+    mode: lookup
+    access: freemium
+    status: active
+    consumes:
+      - email
+    produces:
+      - email_verdict
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+    notes: Disposable/valid checks; free credits then paid. Local disposable-domain lists cover most of this.
+  - id: dehashed
+    name: Dehashed
+    url: https://www.dehashed.com/
+    description: Gather breach data from Dehashed API.
+    source_type: commercial_api
+    category: breach
+    mode: lookup
+    access: paid
+    status: active
+    consumes:
+      - email
+      - username
+      - domain
+      - ip
+      - phone
+      - person
+    produces: &id027
+      - breach_record
+    geo: none
+    layer: null
+    phase: 4
+    priority: normal
+    replacement:
+      - breach_corpus
+  - id: dns_axfr
+    name: DNS Zone Transfer
+    url: null
+    description: Attempts to perform a full DNS zone transfer.
+    source_type: internal
+    category: active_dns
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - domain
+    produces: &id020
+      - hostname
+      - ip
+      - dns_record
+    geo: derived
+    layer: infrastructure
+    phase: 2
+    priority: normal
+    replacement: *id001
+  - id: dns_bruteforce
+    name: DNS Brute-forcer
+    url: null
+    description: Attempts to identify hostnames through brute-forcing common names and iterations.
+    source_type: internal
+    category: active_dns
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - domain
+    produces:
+      - hostname
+      - ip
+    geo: derived
+    layer: infrastructure
+    phase: 2
+    priority: high
+    replacement: *id001
+    notes: >-
+      Wordlists (commonspeak2, assetnote), permutation engine, wildcard detection, massdns-class throughput.
+  - id: dns_for_family
+    name: DNS for Family
+    url: https://dnsforfamily.com/
+    description: Check if a host would be blocked by DNS for Family.
+    source_type: free_api
+    category: dns_filter
+    mode: lookup
+    access: open
+    status: active
+    consumes: *id007
+    produces: *id008
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: dns_lookaside
+    name: DNS Look-aside
+    url: null
+    description: Attempt to reverse-resolve the IP addresses next to your target to see if they are related.
+    source_type: internal
+    category: active_dns
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - ip
+    produces:
+      - hostname
+      - ip
+    geo: derived
+    layer: infrastructure
+    phase: 2
+    priority: normal
+    replacement: *id001
+  - id: dns_raw_records
+    name: DNS Raw Records
+    url: null
+    description: Retrieves raw DNS records such as MX, TXT and others.
+    source_type: internal
+    category: active_dns
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - domain
+      - hostname
+    produces:
+      - dns_record
+    geo: derived
+    layer: infrastructure
+    phase: 1
+    priority: high
+    replacement: *id001
+  - id: dns_resolver
+    name: DNS Resolver
+    url: null
+    description: Resolves hosts and IP addresses identified, also extracted from raw content.
+    source_type: internal
+    category: active_dns
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - hostname
+      - domain
+      - ip
+    produces:
+      - ip
+      - hostname
+    geo: derived
+    layer: infrastructure
+    phase: 1
+    priority: high
+    replacement: *id001
+    notes: 'Core module: forward/reverse resolution over DNS-over-HTTPS or local resolvers, with caching.'
+  - id: dns_srv
+    name: DNS Common SRV
+    url: null
+    description: Attempts to identify hostnames through brute-forcing common DNS SRV records.
+    source_type: internal
+    category: active_dns
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - domain
+    produces: *id020
+    geo: derived
+    layer: infrastructure
+    phase: 2
+    priority: normal
+    replacement: *id001
+  - id: dnsdb
+    name: DNSDB
+    url: https://www.farsightsecurity.com
+    description: Query FarSight's DNSDB for historical and passive DNS data.
+    source_type: tiered_api
+    category: passive_dns
+    mode: lookup
+    access: freemium
+    status: active
+    consumes: &id032
+      - ip
+      - domain
+      - hostname
+    produces: &id021
+      - dns_record
+      - hostname
+      - ip
+    geo: derived
+    layer: infrastructure
+    phase: 3
+    priority: normal
+    replacement:
+      - pdns
+    notes: Farsight/DomainTools; free 'Community' edition is rate-limited.
+  - id: dnsdumpster
+    name: DNSDumpster
+    url: https://dnsdumpster.com/
+    description: Passive subdomain enumeration using HackerTarget's DNSDumpster
+    source_type: free_api
+    category: subdomain_enum
+    mode: lookup
+    access: key_free
+    status: active
+    consumes: *id015
+    produces:
+      - hostname
+      - ip
+    geo: derived
+    layer: infrastructure
+    phase: 1
+    priority: high
+    replacement: *id001
+    notes: Now served by the HackerTarget API with a free key.
+  - id: dnsgrep
+    name: DNSGrep
+    url: https://opendata.rapid7.com/
+    description: Obtain Passive DNS information from Rapid7 Sonar Project using DNSGrep API.
+    source_type: free_api
+    category: passive_dns
+    mode: lookup
+    access: account
+    status: changed
+    consumes:
+      - domain
+      - ip
+    produces: *id021
+    geo: derived
+    layer: infrastructure
+    phase: 3
+    priority: normal
+    replacement:
+      - pdns
+    notes: >-
+      Rapid7 Open Data (Project Sonar) requires approval since 2022; treat as optional bulk source for pdns.
+  - id: do_spaces_finder
+    name: Digital Ocean Space Finder
+    url: https://www.digitalocean.com/products/spaces/
+    description: >-
+      Search for potential Digital Ocean Spaces associated with the target and attempt to list their contents.
+    source_type: free_api
+    category: cloud_storage
+    mode: lookup
+    access: open
+    status: active
+    consumes: *id022
+    produces: *id023
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: dronebl
+    name: DroneBL
+    url: https://dronebl.org/
+    description: Query the DroneBL database for open relays, open proxies, vulnerable servers, etc.
+    source_type: free_api
+    category: proxy_tor
+    mode: lookup
+    access: open
+    status: active
+    consumes: &id048
+      - ip
+      - netblock
+    produces: &id033
+      - verdict
+    geo: derived
+    layer: tor
+    phase: 1
+    priority: normal
+    replacement: *id001
+    notes: DNSBL query (dnsbl.dronebl.org).
+  - id: duckduckgo
+    name: DuckDuckGo
+    url: https://duckduckgo.com/
+    description: Query DuckDuckGo's API for descriptive information about your target.
+    source_type: free_api
+    category: search_engine
+    mode: lookup
+    access: open
+    status: active
+    consumes:
+      - domain
+      - company
+      - person
+    produces:
+      - description
+      - url
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+    notes: Instant Answer API only (no full web results).
+  - id: email_extractor
+    name: E-Mail Address Extractor
+    url: null
+    description: Identify e-mail addresses in any obtained data.
+    source_type: internal
+    category: extractor
+    mode: extract
+    access: local
+    status: active
+    consumes: *id014
+    produces:
+      - email
+    geo: none
+    layer: null
+    phase: 1
+    priority: high
+    replacement: *id001
+  - id: emailcrawlr
+    name: EmailCrawlr
+    url: https://emailcrawlr.com/
+    description: Search EmailCrawlr for email addresses and phone numbers associated with a domain.
+    source_type: tiered_api
+    category: email
+    mode: lookup
+    access: freemium
+    status: verify
+    consumes:
+      - domain
+    produces:
+      - email
+      - phone
+    geo: none
+    layer: null
+    phase: 3
+    priority: normal
+    replacement:
+      - email_intel
+  - id: emailformat
+    name: EmailFormat
+    url: https://www.email-format.com/
+    description: Look up e-mail addresses on email-format.com.
+    source_type: free_api
+    category: email
+    mode: lookup
+    access: scrape
+    status: active
+    consumes:
+      - domain
+    produces:
+      - email
+      - email_pattern
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: emailrep
+    name: EmailRep
+    url: https://emailrep.io/
+    description: Search EmailRep.io for email address reputation.
+    source_type: tiered_api
+    category: email
+    mode: lookup
+    access: freemium
+    status: active
+    consumes:
+      - email
+    produces:
+      - reputation
+      - social_profile
+      - verdict
+    geo: none
+    layer: null
+    phase: 3
+    priority: normal
+    replacement:
+      - email_intel
+  - id: emerging_threats
+    name: Emerging Threats
+    url: https://rules.emergingthreats.net/
+    description: Check if a netblock or IP address is malicious according to EmergingThreats.net.
+    source_type: free_api
+    category: ip_reputation
+    mode: lookup
+    access: open
+    status: active
+    consumes: *id003
+    produces: *id006
+    geo: derived
+    layer: threat
+    phase: 1
+    priority: high
+    replacement: *id001
+  - id: error_string_extractor
+    name: Error String Extractor
+    url: null
+    description: Identify common error messages in content like SQL errors, etc.
+    source_type: internal
+    category: extractor
+    mode: extract
+    access: local
+    status: active
+    consumes: *id014
+    produces:
+      - error_message
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+  - id: ethereum_extractor
+    name: Ethereum Address Extractor
+    url: null
+    description: Identify ethereum addresses in scraped webpages.
+    source_type: internal
+    category: extractor
+    mode: extract
+    access: local
+    status: active
+    consumes: *id014
+    produces:
+      - eth_address
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+    notes: EIP-55 checksum aware.
+  - id: etherscan
+    name: Etherscan
+    url: https://etherscan.io
+    description: Queries etherscan.io to find the balance of identified ethereum wallet addresses.
+    source_type: free_api
+    category: crypto
+    mode: lookup
+    access: key_free
+    status: active
+    consumes:
+      - eth_address
+    produces:
+      - crypto_balance
+      - crypto_transaction
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: file_metadata
+    name: File Metadata Extractor
+    url: null
+    description: Extracts meta data from documents and images.
+    source_type: internal
+    category: file_analysis
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - raw_file
+    produces:
+      - person
+      - software
+      - geo_point
+      - timestamp
+    geo: direct
+    layer: media
+    phase: 2
+    priority: high
+    replacement: *id001
+    notes: EXIF/XMP/IPTC via exiftool; GPS tags become exact-precision points on the media layer.
+  - id: flickr
+    name: Flickr
+    url: https://www.flickr.com/
+    description: Search Flickr for domains, URLs and emails related to the specified domain.
+    source_type: free_api
+    category: social
+    mode: lookup
+    access: key_free
+    status: active
+    consumes:
+      - domain
+      - email
+      - username
+    produces:
+      - social_profile
+      - url
+      - email
+      - geo_point
+    geo: direct
+    layer: media
+    phase: 1
+    priority: normal
+    replacement: *id001
+    notes: Geotagged photos are exact-precision media points.
+  - id: focsec
+    name: Focsec
+    url: https://focsec.com/
+    description: Look up IP address information from Focsec.
+    source_type: tiered_api
+    category: ip_geolocation
+    mode: lookup
+    access: freemium
+    status: active
+    consumes: &id028
+      - ip
+    produces:
+      - geo_point
+      - verdict
+    geo: direct
+    layer: infrastructure
+    phase: 3
+    priority: normal
+    replacement:
+      - geoip
+      - threat_scoring
+  - id: fortiguard
+    name: FortiGuard Antispam
+    url: https://www.fortiguard.com/
+    description: Check if an IP address is malicious according to FortiGuard Antispam.
+    source_type: free_api
+    category: ip_reputation
+    mode: lookup
+    access: scrape
+    status: verify
+    consumes:
+      - ip
+    produces: *id006
+    geo: derived
+    layer: threat
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: fraudguard
+    name: Fraudguard
+    url: https://fraudguard.io/
+    description: Obtain threat information from Fraudguard.io
+    source_type: tiered_api
+    category: ip_reputation
+    mode: lookup
+    access: freemium
+    status: active
+    consumes:
+      - ip
+    produces:
+      - verdict
+      - reputation
+      - geo_point
+    geo: derived
+    layer: threat
+    phase: 3
+    priority: normal
+    replacement:
+      - threat_scoring
+      - geoip
+  - id: fullcontact
+    name: FullContact
+    url: https://www.fullcontact.com
+    description: Gather domain and e-mail information from FullContact.com API.
+    source_type: tiered_api
+    category: email
+    mode: lookup
+    access: paid
+    status: changed
+    consumes:
+      - email
+      - domain
+      - phone
+    produces:
+      - person
+      - company
+      - social_profile
+      - physical_address
+    geo: none
+    layer: null
+    phase: 3
+    priority: normal
+    replacement:
+      - email_intel
+      - company_intel
+      - social_engine
+    notes: Enterprise-only contracts now.
+  - id: fullhunt
+    name: FullHunt
+    url: https://fullhunt.io/
+    description: Identify domain attack surface using FullHunt API.
+    source_type: tiered_api
+    category: subdomain_enum
+    mode: lookup
+    access: freemium
+    status: active
+    consumes: *id015
+    produces:
+      - hostname
+      - ip
+      - open_port
+    geo: derived
+    layer: infrastructure
+    phase: 3
+    priority: normal
+    replacement:
+      - subdomain_engine
+      - scanner
+  - id: gcs_bucket_finder
+    name: Google Object Storage Finder
+    url: https://cloud.google.com/storage
+    description: >-
+      Search for potential Google Object Storage buckets associated with the target and attempt to list their contents.
+    source_type: free_api
+    category: cloud_storage
+    mode: lookup
+    access: open
+    status: active
+    consumes: *id022
+    produces: *id023
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: gdelt
+    name: GDELT
+    url: https://www.gdeltproject.org/
+    description: Monitor global news and events via the GDELT Project, updated every 15 minutes.
+    source_type: free_api
+    category: geo_feed
+    mode: feed
+    access: open
+    status: active
+    consumes: *id002
+    produces:
+      - news_event
+      - url
+    geo: direct
+    layer: news
+    phase: 1
+    priority: high
+    replacement: *id001
+    cadence: 15m
+    notes: >-
+      GDELT 2.0 Events + GKG every 15 minutes (CSV) and DOC 2.0 API for search. Events carry ActionGeo lat/lon with a precision
+      code.
+  - id: github
+    name: Github
+    url: https://github.com/
+    description: Identify associated public code repositories on Github.
+    source_type: free_api
+    category: code_search
+    mode: lookup
+    access: key_free
+    status: active
+    consumes:
+      - domain
+      - email
+      - username
+      - company
+    produces: &id026
+      - code_repo
+      - url
+      - email
+      - username
+    geo: none
+    layer: null
+    phase: 1
+    priority: high
+    replacement: *id001
+    notes: Token strongly recommended (5,000 req/h vs 60 unauthenticated).
+  - id: gleif
+    name: GLEIF
+    url: https://search.gleif.org/
+    description: Look up company information from Global Legal Entity Identifier Foundation (GLEIF).
+    source_type: tiered_api
+    category: company
+    mode: lookup
+    access: open
+    status: active
+    consumes:
+      - company
+      - lei
+    produces:
+      - lei
+      - company
+      - physical_address
+    geo: derived
+    layer: corporate
+    phase: 1
+    priority: normal
+    replacement:
+      - local_reimpl
+    notes: The GLEIF LEI API is free and unauthenticated; reclassified from tiered to free.
+  - id: google_cse
+    name: Google
+    url: https://developers.google.com/custom-search
+    description: Obtain information from the Google Custom Search API to identify sub-domains and links.
+    source_type: tiered_api
+    category: search_engine
+    mode: lookup
+    access: freemium
+    status: active
+    consumes: *id024
+    produces: *id025
+    geo: none
+    layer: null
+    phase: 3
+    priority: normal
+    replacement:
+      - meta_search
+      - subdomain_engine
+    notes: 'Custom Search JSON API: 100 free queries/day.'
+  - id: google_maps
+    name: Google Maps
+    url: https://cloud.google.com/maps-platform/
+    description: Identifies potential physical addresses and latitude/longitude coordinates.
+    source_type: tiered_api
+    category: geocoding
+    mode: lookup
+    access: paid
+    status: active
+    consumes: &id034
+      - physical_address
+      - geo_point
+    produces: &id035
+      - geo_point
+      - physical_address
+    geo: direct
+    layer: investigation
+    phase: 3
+    priority: normal
+    replacement:
+      - geocoder
+  - id: google_safebrowsing
+    name: Google SafeBrowsing
+    url: https://developers.google.com/safe-browsing/v4/lookup-api
+    description: Check if the URL is included on any of the Safe Browsing lists.
+    source_type: free_api
+    category: domain_reputation
+    mode: lookup
+    access: key_free
+    status: active
+    consumes: &id039
+      - domain
+      - hostname
+      - url
+    produces: *id011
+    geo: derived
+    layer: threat
+    phase: 1
+    priority: high
+    replacement: *id001
+    notes: Lookup API v4 with a free key.
+  - id: gravatar
+    name: Gravatar
+    url: https://secure.gravatar.com/
+    description: Retrieve user information from Gravatar API.
+    source_type: free_api
+    category: social
+    mode: lookup
+    access: open
+    status: active
+    consumes:
+      - email
+    produces:
+      - social_profile
+      - person
+      - username
+      - url
+    geo: derived
+    layer: social
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: grayhat_warfare
+    name: Grayhat Warfare
+    url: https://buckets.grayhatwarfare.com/
+    description: Find bucket names matching the keyword extracted from a domain from Grayhat API.
+    source_type: tiered_api
+    category: cloud_storage
+    mode: lookup
+    access: freemium
+    status: active
+    consumes:
+      - domain
+      - company
+      - keyword
+    produces: *id023
+    geo: none
+    layer: null
+    phase: 3
+    priority: normal
+    replacement:
+      - bucket_hunter
+  - id: greensnow
+    name: Greensnow
+    url: https://greensnow.co/
+    description: Check if a netblock or IP address is malicious according to greensnow.co.
+    source_type: free_api
+    category: ip_reputation
+    mode: lookup
+    access: open
+    status: active
+    consumes: *id003
+    produces: *id006
+    geo: derived
+    layer: threat
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: grep_app
+    name: grep.app
+    url: https://grep.app/
+    description: Search grep.app API for links and emails related to the specified domain.
+    source_type: free_api
+    category: code_search
+    mode: lookup
+    access: open
+    status: verify
+    consumes:
+      - domain
+      - email
+    produces: *id026
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+    notes: Unofficial JSON endpoint.
+  - id: greynoise
+    name: GreyNoise
+    url: https://greynoise.io/
+    description: Obtain IP enrichment data from GreyNoise
+    source_type: tiered_api
+    category: ip_reputation
+    mode: lookup
+    access: paid
+    status: active
+    consumes:
+      - ip
+    produces:
+      - verdict
+      - classification
+      - threat_report
+    geo: derived
+    layer: threat
+    phase: 3
+    priority: normal
+    replacement:
+      - threat_scoring
+    notes: Replacement requires an internet-background-noise sensor network (honeypots) of our own.
+  - id: greynoise_community
+    name: GreyNoise Community
+    url: https://greynoise.io/
+    description: Obtain IP enrichment data from GreyNoise Community API
+    source_type: tiered_api
+    category: ip_reputation
+    mode: lookup
+    access: key_free
+    status: changed
+    consumes:
+      - ip
+    produces:
+      - verdict
+      - classification
+    geo: derived
+    layer: threat
+    phase: 3
+    priority: normal
+    replacement:
+      - threat_scoring
+    notes: Community API access has been curtailed; verify current terms.
+  - id: hackerone_unofficial
+    name: HackerOne (Unofficial)
+    url: http://www.nobbd.de/
+    description: Check external vulnerability scanning/reporting service h1.nobbd.de to see if the target is listed.
+    source_type: free_api
+    category: vuln_scan
+    mode: lookup
+    access: scrape
+    status: verify
+    consumes:
+      - domain
+      - company
+    produces:
+      - vulnerability
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: hackertarget
+    name: HackerTarget
+    url: https://hackertarget.com/
+    description: Search HackerTarget.com for hosts sharing the same IP.
+    source_type: free_api
+    category: passive_dns
+    mode: lookup
+    access: freemium
+    status: active
+    consumes:
+      - ip
+      - domain
+    produces:
+      - hostname
+      - ip
+    geo: derived
+    layer: infrastructure
+    phase: 1
+    priority: high
+    replacement: *id001
+    notes: Reverse IP, hostsearch, geoip; free tier without key, higher quota with key.
+  - id: hash_extractor
+    name: Hash Extractor
+    url: null
+    description: Identify MD5 and SHA hashes in web content, files and more.
+    source_type: internal
+    category: extractor
+    mode: extract
+    access: local
+    status: active
+    consumes: *id014
+    produces:
+      - hash
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: hibp
+    name: HaveIBeenPwned
+    url: https://haveibeenpwned.com/
+    description: Check HaveIBeenPwned.com for hacked e-mail addresses identified in breaches.
+    source_type: commercial_api
+    category: breach
+    mode: lookup
+    access: paid
+    status: active
+    consumes:
+      - email
+      - domain
+    produces: *id027
+    geo: none
+    layer: null
+    phase: 4
+    priority: normal
+    replacement:
+      - breach_corpus
+    notes: >-
+      Low-cost paid key; domain search is free for verified domains. Pwned Passwords (k-anonymity) is free.
+  - id: host_io
+    name: Host.io
+    url: https://host.io
+    description: Obtain information about domain names from host.io.
+    source_type: tiered_api
+    category: passive_dns
+    mode: lookup
+    access: freemium
+    status: active
+    consumes:
+      - domain
+      - ip
+    produces:
+      - hostname
+      - ip
+      - domain
+      - web_analytics_id
+    geo: derived
+    layer: infrastructure
+    phase: 3
+    priority: normal
+    replacement:
+      - pdns
+      - tech_fingerprint
+  - id: hosting_provider
+    name: Hosting Provider Identifier
+    url: null
+    description: >-
+      Find out if any IP addresses identified fall within known 3rd party hosting ranges, e.g. Amazon, Azure, etc.
+    source_type: internal
+    category: hosting
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - ip
+      - netblock
+    produces:
+      - company
+      - cloud_region
+    geo: direct
+    layer: cloud_regions
+    phase: 1
+    priority: high
+    replacement: *id001
+    notes: >-
+      Published ranges: AWS ip-ranges.json, Azure ServiceTags, GCP, Cloudflare, DigitalOcean, OCI, Linode, Hetzner, Fastly;
+      mapped to region centroids on the cloud_regions layer.
+  - id: human_name_extractor
+    name: Human Name Extractor
+    url: null
+    description: Attempt to identify human names in fetched content.
+    source_type: internal
+    category: extractor
+    mode: extract
+    access: local
+    status: active
+    consumes: *id014
+    produces:
+      - person
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+    notes: spaCy NER with title/honorific heuristics.
+  - id: hunter
+    name: Hunter.io
+    url: https://hunter.io/
+    description: Check for e-mail addresses and names on hunter.io.
+    source_type: tiered_api
+    category: email
+    mode: lookup
+    access: freemium
+    status: active
+    consumes:
+      - domain
+      - email
+    produces:
+      - email
+      - person
+      - email_pattern
+    geo: none
+    layer: null
+    phase: 3
+    priority: normal
+    replacement:
+      - email_intel
+  - id: hybrid_analysis
+    name: Hybrid Analysis
+    url: https://www.hybrid-analysis.com
+    description: Search Hybrid Analysis for domains and URLs related to the target.
+    source_type: free_api
+    category: threat_intel_platform
+    mode: lookup
+    access: key_free
+    status: active
+    consumes:
+      - domain
+      - url
+      - hash
+      - ip
+    produces:
+      - hash
+      - verdict
+      - url
+    geo: derived
+    layer: threat
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: iban_extractor
+    name: IBAN Number Extractor
+    url: null
+    description: Identify International Bank Account Numbers (IBANs) in any data.
+    source_type: internal
+    category: extractor
+    mode: extract
+    access: local
+    status: active
+    consumes: *id014
+    produces:
+      - iban
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+    notes: mod-97 validated.
+  - id: iknowwhatyoudownload
+    name: Iknowwhatyoudownload.com
+    url: https://iknowwhatyoudownload.com/en/peer/
+    description: Check iknowwhatyoudownload.com for IP addresses that have been using torrents.
+    source_type: tiered_api
+    category: ip_reputation
+    mode: lookup
+    access: freemium
+    status: active
+    consumes:
+      - ip
+    produces:
+      - p2p_activity
+    geo: derived
+    layer: threat
+    phase: 3
+    priority: normal
+    replacement:
+      - p2p_monitor
+  - id: intelx
+    name: IntelligenceX
+    url: https://intelx.io/
+    description: >-
+      Obtain information from IntelligenceX about identified IP addresses, domains, e-mail addresses and phone numbers.
+    source_type: tiered_api
+    category: breach
+    mode: lookup
+    access: freemium
+    status: active
+    consumes:
+      - ip
+      - domain
+      - email
+      - phone
+      - url
+      - btc_address
+    produces:
+      - breach_record
+      - paste
+      - darkweb_mention
+    geo: none
+    layer: null
+    phase: 3
+    priority: normal
+    replacement:
+      - darkweb_crawler
+      - breach_corpus
+      - paste_monitor
+  - id: interesting_files
+    name: Interesting File Finder
+    url: null
+    description: Identifies potential files of interest, e.g. office documents, zip files.
+    source_type: internal
+    category: file_analysis
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - url
+    produces:
+      - raw_file
+      - url
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+  - id: ipapi_co
+    name: ipapi.co
+    url: https://ipapi.co/
+    description: Queries ipapi.co to identify geolocation of IP Addresses using ipapi.co API
+    source_type: tiered_api
+    category: ip_geolocation
+    mode: lookup
+    access: freemium
+    status: active
+    consumes: *id028
+    produces: &id029
+      - geo_point
+      - asn
+      - company
+    geo: direct
+    layer: infrastructure
+    phase: 3
+    priority: normal
+    replacement:
+      - geoip
+  - id: ipapi_com
+    name: ipapi.com
+    url: https://ipapi.com/
+    description: Queries ipapi.com to identify geolocation of IP Addresses using ipapi.com API
+    source_type: tiered_api
+    category: ip_geolocation
+    mode: lookup
+    access: freemium
+    status: active
+    consumes: *id028
+    produces: *id029
+    geo: direct
+    layer: infrastructure
+    phase: 3
+    priority: normal
+    replacement:
+      - geoip
+  - id: ipinfo
+    name: IPInfo.io
+    url: https://ipinfo.io
+    description: Identifies the physical location of IP addresses identified using ipinfo.io.
+    source_type: tiered_api
+    category: ip_geolocation
+    mode: lookup
+    access: freemium
+    status: active
+    consumes: *id028
+    produces: *id029
+    geo: direct
+    layer: infrastructure
+    phase: 3
+    priority: normal
+    replacement:
+      - geoip
+    notes: IPinfo Lite (country/ASN) is free and bulk-downloadable; a good geoip input.
+  - id: ipqualityscore
+    name: IPQualityScore
+    url: https://www.ipqualityscore.com/
+    description: Determine if target is malicious using IPQualityScore API
+    source_type: tiered_api
+    category: ip_reputation
+    mode: lookup
+    access: freemium
+    status: active
+    consumes:
+      - ip
+      - email
+      - phone
+      - url
+    produces:
+      - verdict
+      - reputation
+      - geo_point
+    geo: derived
+    layer: threat
+    phase: 3
+    priority: normal
+    replacement:
+      - threat_scoring
+      - geoip
+      - email_intel
+      - phone_intel
+  - id: ipregistry
+    name: ipregistry
+    url: https://ipregistry.co/
+    description: Query the ipregistry.co database for reputation and geo-location.
+    source_type: tiered_api
+    category: ip_geolocation
+    mode: lookup
+    access: freemium
+    status: active
+    consumes: *id028
+    produces:
+      - geo_point
+      - asn
+      - company
+      - verdict
+    geo: direct
+    layer: infrastructure
+    phase: 3
+    priority: normal
+    replacement:
+      - geoip
+      - threat_scoring
+  - id: ipstack
+    name: ipstack
+    url: https://ipstack.com/
+    description: Identifies the physical location of IP addresses identified using ipstack.com.
+    source_type: tiered_api
+    category: ip_geolocation
+    mode: lookup
+    access: freemium
+    status: active
+    consumes: *id028
+    produces: *id029
+    geo: direct
+    layer: infrastructure
+    phase: 3
+    priority: normal
+    replacement:
+      - geoip
+  - id: isc_sans
+    name: Internet Storm Center
+    url: https://isc.sans.edu
+    description: Check if an IP address is malicious according to SANS ISC.
+    source_type: free_api
+    category: ip_reputation
+    mode: lookup
+    access: open
+    status: active
+    consumes:
+      - ip
+    produces:
+      - verdict
+      - attack_count
+    geo: derived
+    layer: threat
+    phase: 1
+    priority: high
+    replacement: *id001
+  - id: jsonwhois
+    name: JsonWHOIS.com
+    url: https://jsonwhois.com
+    description: Search JsonWHOIS.com for WHOIS records associated with a domain.
+    source_type: tiered_api
+    category: whois
+    mode: lookup
+    access: freemium
+    status: active
+    consumes:
+      - domain
+    produces: &id051
+      - whois_record
+      - email
+      - person
+      - company
+      - physical_address
+      - phone
+    geo: derived
+    layer: corporate
+    phase: 3
+    priority: normal
+    replacement:
+      - whois_archive
+  - id: junk_files
+    name: Junk File Finder
+    url: null
+    description: Looks for old/temporary and other similar files.
+    source_type: internal
+    category: web_recon
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - url
+      - hostname
+    produces:
+      - url
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+  - id: keybase
+    name: Keybase
+    url: https://keybase.io/
+    description: Obtain additional information about domain names and identified usernames.
+    source_type: free_api
+    category: social
+    mode: lookup
+    access: open
+    status: active
+    consumes:
+      - username
+      - domain
+      - email
+    produces:
+      - social_profile
+      - pgp_key
+      - person
+      - btc_address
+    geo: derived
+    layer: social
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: koodous
+    name: Koodous
+    url: https://koodous.com/apks/
+    description: Search Koodous for mobile apps.
+    source_type: tiered_api
+    category: app_stores
+    mode: lookup
+    access: key_free
+    status: active
+    consumes: *id019
+    produces: *id030
+    geo: none
+    layer: null
+    phase: 3
+    priority: normal
+    replacement:
+      - app_intel
+  - id: leak_lookup
+    name: Leak-Lookup
+    url: https://leak-lookup.com/
+    description: Searches Leak-Lookup.com's database of breaches.
+    source_type: free_api
+    category: breach
+    mode: lookup
+    access: key_free
+    status: active
+    consumes:
+      - email
+      - domain
+      - username
+      - ip
+      - phone
+    produces: *id027
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: leakix
+    name: LeakIX
+    url: https://leakix.net/
+    description: Search LeakIX for host data leaks, open ports, software and geoip.
+    source_type: free_api
+    category: internet_scan
+    mode: lookup
+    access: key_free
+    status: active
+    consumes: *id031
+    produces:
+      - open_port
+      - software
+      - breach_record
+      - geo_point
+      - hostname
+    geo: direct
+    layer: infrastructure
+    phase: 1
+    priority: high
+    replacement: *id001
+  - id: maltiverse
+    name: Maltiverse
+    url: https://maltiverse.com
+    description: Obtain information about any malicious activities involving IP addresses
+    source_type: free_api
+    category: threat_intel_platform
+    mode: lookup
+    access: key_free
+    status: active
+    consumes: &id041
+      - ip
+      - domain
+      - hostname
+      - url
+      - hash
+    produces:
+      - verdict
+    geo: derived
+    layer: threat
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: malwarepatrol
+    name: MalwarePatrol
+    url: https://www.malwarepatrol.net/
+    description: Searches malwarepatrol.net's database of malicious URLs/IPs.
+    source_type: tiered_api
+    category: domain_reputation
+    mode: lookup
+    access: paid
+    status: active
+    consumes:
+      - ip
+      - domain
+      - url
+    produces: *id011
+    geo: derived
+    layer: threat
+    phase: 3
+    priority: normal
+    replacement:
+      - threat_scoring
+  - id: metadefender
+    name: MetaDefender
+    url: https://metadefender.opswat.com/
+    description: Search MetaDefender API for IP address and domain IP reputation.
+    source_type: tiered_api
+    category: threat_intel_platform
+    mode: lookup
+    access: freemium
+    status: active
+    consumes:
+      - ip
+      - domain
+      - hash
+      - url
+    produces:
+      - verdict
+    geo: derived
+    layer: threat
+    phase: 3
+    priority: normal
+    replacement:
+      - threat_scoring
+  - id: mnemonic_pdns
+    name: Mnemonic PassiveDNS
+    url: https://www.mnemonic.no
+    description: Obtain Passive DNS information from PassiveDNS.mnemonic.no.
+    source_type: free_api
+    category: passive_dns
+    mode: lookup
+    access: open
+    status: active
+    consumes: *id032
+    produces: *id021
+    geo: derived
+    layer: infrastructure
+    phase: 1
+    priority: high
+    replacement: *id001
+  - id: multiproxy
+    name: multiproxy.org Open Proxies
+    url: https://multiproxy.org/
+    description: Check if an IP address is an open proxy according to multiproxy.org open proxy list.
+    source_type: free_api
+    category: proxy_tor
+    mode: lookup
+    access: open
+    status: active
+    consumes:
+      - ip
+    produces: *id033
+    geo: derived
+    layer: tor
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: myspace
+    name: MySpace
+    url: https://myspace.com/
+    description: Gather username and location from MySpace.com profiles.
+    source_type: free_api
+    category: social
+    mode: lookup
+    access: scrape
+    status: verify
+    consumes: &id050
+      - username
+    produces:
+      - social_profile
+      - person
+      - physical_address
+    geo: derived
+    layer: social
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: nameapi
+    name: NameAPI
+    url: https://www.nameapi.org/
+    description: Check whether an email is disposable
+    source_type: tiered_api
+    category: email
+    mode: lookup
+    access: freemium
+    status: active
+    consumes:
+      - email
+    produces:
+      - email_verdict
+    geo: none
+    layer: null
+    phase: 3
+    priority: normal
+    replacement:
+      - email_intel
+  - id: nasa_firms
+    name: NASA FIRMS
+    url: https://firms.modaps.eosdis.nasa.gov/
+    description: >-
+      Obtain active fire and thermal hotspot detections from NASA FIRMS satellite data, updated roughly every 3 hours.
+    source_type: free_api
+    category: geo_feed
+    mode: feed
+    access: key_free
+    status: active
+    consumes: *id002
+    produces:
+      - fire_event
+    geo: direct
+    layer: fires
+    phase: 1
+    priority: high
+    replacement: *id001
+    cadence: 3h
+    notes: >-
+      VIIRS (SNPP/NOAA-20/NOAA-21) and MODIS NRT hotspots via the area API with a free MAP_KEY; ultra-real-time (URT) where
+      available.
+  - id: networksdb
+    name: NetworksDB
+    url: https://networksdb.io/
+    description: Search NetworksDB.io API for IP address and domain information.
+    source_type: tiered_api
+    category: network_registry
+    mode: lookup
+    access: freemium
+    status: active
+    consumes:
+      - ip
+      - domain
+      - company
+    produces:
+      - netblock
+      - company
+      - hostname
+    geo: derived
+    layer: infrastructure
+    phase: 3
+    priority: normal
+    replacement:
+      - pdns
+      - whois_archive
+  - id: neutrinoapi
+    name: NeutrinoAPI
+    url: https://www.neutrinoapi.com/
+    description: Search NeutrinoAPI for phone location information, IP address information, and host reputation.
+    source_type: tiered_api
+    category: phone
+    mode: lookup
+    access: freemium
+    status: active
+    consumes:
+      - phone
+      - ip
+      - hostname
+    produces:
+      - phone_info
+      - geo_point
+      - verdict
+    geo: derived
+    layer: social
+    phase: 3
+    priority: normal
+    replacement:
+      - phone_intel
+      - geoip
+      - threat_scoring
+  - id: nominatim
+    name: OpenStreetMap
+    url: https://www.openstreetmap.org/
+    description: Retrieves latitude/longitude coordinates for physical addresses from OpenStreetMap API.
+    source_type: free_api
+    category: geocoding
+    mode: lookup
+    access: open
+    status: active
+    consumes: *id034
+    produces: *id035
+    geo: direct
+    layer: investigation
+    phase: 1
+    priority: high
+    replacement: *id001
+    notes: >-
+      Public Nominatim usage policy is 1 req/s and forbids bulk use; self-host Nominatim/Photon (see geocoder service).
+  - id: numverify
+    name: numverify
+    url: http://numverify.com/
+    description: Lookup phone number location and carrier information from numverify.com.
+    source_type: tiered_api
+    category: phone
+    mode: lookup
+    access: freemium
+    status: active
+    consumes: *id036
+    produces: *id037
+    geo: derived
+    layer: social
+    phase: 3
+    priority: normal
+    replacement:
+      - phone_intel
+    notes: libphonenumber offline covers validity, region, type and (partly) carrier.
+  - id: onion_link
+    name: Onion.link
+    url: https://onion.link/
+    description: Search Tor 'Onion City' search engine for mentions of the target domain using Google Custom Search.
+    source_type: free_api
+    category: dark_web
+    mode: lookup
+    access: dead
+    status: defunct
+    consumes:
+      - domain
+    produces: *id038
+    geo: none
+    layer: null
+    phase: 3
+    priority: normal
+    replacement:
+      - darkweb_crawler
+    notes: Relied on Google CSE over a now-defunct clearnet proxy.
+  - id: onionsearchengine
+    name: Onionsearchengine.com
+    url: https://as.onionsearchengine.com
+    description: Search Tor onionsearchengine.com for mentions of the target domain.
+    source_type: free_api
+    category: dark_web
+    mode: lookup
+    access: scrape
+    status: verify
+    consumes:
+      - domain
+    produces: *id038
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: onyphe
+    name: Onyphe
+    url: https://www.onyphe.io
+    description: Check Onyphe data (threat list, geo-location, pastries, vulnerabilities)  about a given IP.
+    source_type: tiered_api
+    category: internet_scan
+    mode: lookup
+    access: freemium
+    status: active
+    consumes: *id031
+    produces:
+      - open_port
+      - software
+      - vulnerability
+      - verdict
+      - geo_point
+      - paste
+    geo: direct
+    layer: infrastructure
+    phase: 3
+    priority: normal
+    replacement:
+      - scanner
+      - threat_scoring
+      - geoip
+  - id: openbugbounty
+    name: Open Bug Bounty
+    url: https://www.openbugbounty.org/
+    description: >-
+      Check external vulnerability scanning/reporting service openbugbounty.org to see if the target is listed.
+    source_type: free_api
+    category: vuln_scan
+    mode: lookup
+    access: open
+    status: active
+    consumes:
+      - domain
+      - hostname
+    produces: &id042
+      - vulnerability
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: opencellid
+    name: OpenCellID
+    url: https://opencellid.org/
+    description: Obtain cell tower geolocation data from OpenCellID, updated monthly.
+    source_type: free_api
+    category: geo_feed
+    mode: feed
+    access: key_free
+    status: active
+    consumes: *id002
+    produces:
+      - cell_tower
+    geo: direct
+    layer: cell_towers
+    phase: 1
+    priority: high
+    replacement: *id001
+    cadence: monthly
+    notes: >-
+      ~40M towers. Ingest the full monthly CSV dump into a PostGIS table served as vector tiles; API for point queries.
+  - id: opencorporates
+    name: OpenCorporates
+    url: https://opencorporates.com
+    description: Look up company information from OpenCorporates.
+    source_type: tiered_api
+    category: company
+    mode: lookup
+    access: account
+    status: active
+    consumes:
+      - company
+      - person
+    produces:
+      - company
+      - physical_address
+      - person
+    geo: derived
+    layer: corporate
+    phase: 3
+    priority: normal
+    replacement:
+      - company_intel
+    notes: >-
+      Free API key for non-commercial use; replacement aggregates national registries (SEC EDGAR, Companies House, etc.).
+  - id: opendns
+    name: OpenDNS
+    url: https://www.opendns.com/
+    description: Check if a host would be blocked by OpenDNS.
+    source_type: free_api
+    category: dns_filter
+    mode: lookup
+    access: open
+    status: active
+    consumes: *id007
+    produces: *id008
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+    notes: FamilyShield resolvers.
+  - id: opennic
+    name: OpenNIC DNS
+    url: https://www.opennic.org/
+    description: Resolves host names in the OpenNIC alternative DNS system.
+    source_type: free_api
+    category: active_dns
+    mode: lookup
+    access: open
+    status: active
+    consumes:
+      - hostname
+    produces:
+      - ip
+    geo: derived
+    layer: infrastructure
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: openphish
+    name: OpenPhish
+    url: https://openphish.com/
+    description: Check if a host/domain is malicious according to OpenPhish.com.
+    source_type: free_api
+    category: domain_reputation
+    mode: lookup
+    access: open
+    status: active
+    consumes: *id039
+    produces: *id011
+    geo: derived
+    layer: threat
+    phase: 1
+    priority: high
+    replacement: *id001
+    notes: Community feed (hourly).
+  - id: opensky
+    name: OpenSky Network
+    url: https://opensky-network.org/
+    description: Obtain live aircraft positions (ADS-B) from the OpenSky Network, updated roughly every 5 seconds.
+    source_type: tiered_api
+    category: geo_feed
+    mode: feed
+    access: account
+    status: active
+    consumes: *id002
+    produces:
+      - aircraft
+      - position
+    geo: direct
+    layer: aviation
+    phase: 3
+    priority: high
+    replacement:
+      - adsb_network
+    cadence: 5s
+    notes: >-
+      Anonymous: 400 credits/day, 10s resolution; registered: 4,000 credits/day, 5s. Replacement aggregates community feeds
+      (adsb.lol, adsb.fi, airplanes.live) and our own RTL-SDR receivers.
+  - id: page_info
+    name: Page Information
+    url: null
+    description: Obtain information about web pages (do they take passwords, do they contain forms, etc.)
+    source_type: internal
+    category: web_recon
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - url
+      - raw_content
+    produces:
+      - page_info
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+  - id: pastebin
+    name: PasteBin
+    url: https://pastebin.com/
+    description: PasteBin search (via Google Search API) to identify related content.
+    source_type: tiered_api
+    category: paste_leak
+    mode: lookup
+    access: freemium
+    status: active
+    consumes: &id049
+      - domain
+      - email
+      - username
+    produces: &id040
+      - paste
+      - url
+    geo: none
+    layer: null
+    phase: 3
+    priority: normal
+    replacement:
+      - paste_monitor
+    notes: Uses Google CSE quota.
+  - id: perplexity_sonar
+    name: Perplexity AI (Sonar)
+    url: https://docs.perplexity.ai/
+    description: >-
+      On-demand AI-powered web search, analysis, briefings and enrichment with citations using Perplexity's Sonar API.
+    source_type: commercial_api
+    category: ai_analysis
+    mode: lookup
+    access: paid
+    status: active
+    consumes:
+      - keyword
+      - domain
+      - company
+      - person
+      - ip
+      - url
+    produces:
+      - description
+      - url
+      - search_result
+    geo: none
+    layer: null
+    phase: 4
+    priority: normal
+    replacement:
+      - ai_analyst
+  - id: pgp_keyservers
+    name: PGP Key Servers
+    url: null
+    description: Look up domains and e-mail addresses in PGP public key servers.
+    source_type: internal
+    category: email
+    mode: lookup
+    access: open
+    status: active
+    consumes:
+      - email
+      - domain
+    produces:
+      - pgp_key
+      - email
+      - person
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+    notes: HKP queries to keys.openpgp.org and keyserver.ubuntu.com.
+  - id: phishstats
+    name: PhishStats
+    url: https://phishstats.info/
+    description: Check if a netblock or IP address is malicious according to PhishStats.
+    source_type: free_api
+    category: domain_reputation
+    mode: lookup
+    access: open
+    status: active
+    consumes:
+      - ip
+      - netblock
+      - url
+    produces: *id011
+    geo: derived
+    layer: threat
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: phishtank
+    name: PhishTank
+    url: https://phishtank.com/
+    description: Check if a host/domain is malicious according to PhishTank.
+    source_type: free_api
+    category: domain_reputation
+    mode: lookup
+    access: key_free
+    status: verify
+    consumes: *id039
+    produces: *id011
+    geo: derived
+    layer: threat
+    phase: 1
+    priority: normal
+    replacement: *id001
+    notes: New API key registration has been closed for long periods; anonymous access is throttled.
+  - id: phone_extractor
+    name: Phone Number Extractor
+    url: null
+    description: Identify phone numbers in scraped webpages.
+    source_type: internal
+    category: extractor
+    mode: extract
+    access: local
+    status: active
+    consumes: *id014
+    produces:
+      - phone
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+    notes: libphonenumber matcher with region hints.
+  - id: port_scanner
+    name: Port Scanner - TCP
+    url: null
+    description: Scans for commonly open TCP ports on Internet-facing systems.
+    source_type: internal
+    category: vuln_scan
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - ip
+      - hostname
+    produces:
+      - open_port
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+    requires_authorization: true
+    notes: Async SYN/connect scanner with adaptive rate; only runs against in-scope targets.
+  - id: project_honeypot
+    name: Project Honey Pot
+    url: https://www.projecthoneypot.org/
+    description: Query the Project Honey Pot database for IP addresses.
+    source_type: free_api
+    category: ip_reputation
+    mode: lookup
+    access: key_free
+    status: active
+    consumes:
+      - ip
+    produces: *id006
+    geo: derived
+    layer: threat
+    phase: 1
+    priority: normal
+    replacement: *id001
+    notes: http:BL DNS API.
+  - id: psbdmp
+    name: Psbdmp
+    url: https://psbdmp.cc/
+    description: Check psbdmp.cc (PasteBin Dump) for potentially hacked e-mails and domains.
+    source_type: free_api
+    category: paste_leak
+    mode: lookup
+    access: open
+    status: verify
+    consumes:
+      - email
+      - domain
+    produces: *id040
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+    notes: Intermittent availability.
+  - id: pulsedive
+    name: Pulsedive
+    url: https://pulsedive.com/
+    description: Obtain information from Pulsedive's API.
+    source_type: tiered_api
+    category: threat_intel_platform
+    mode: lookup
+    access: freemium
+    status: active
+    consumes: *id041
+    produces:
+      - verdict
+      - reputation
+      - open_port
+      - geo_point
+    geo: derived
+    layer: threat
+    phase: 3
+    priority: normal
+    replacement:
+      - threat_scoring
+  - id: punkspider
+    name: PunkSpider
+    url: https://punkspider.io/
+    description: Check the QOMPLX punkspider.io service to see if the target is listed as vulnerable.
+    source_type: free_api
+    category: vuln_scan
+    mode: lookup
+    access: dead
+    status: defunct
+    consumes:
+      - domain
+    produces: *id042
+    geo: none
+    layer: null
+    phase: 3
+    priority: normal
+    replacement:
+      - scanner
+  - id: quad9
+    name: Quad9
+    url: https://quad9.net/
+    description: Check if a host would be blocked by Quad9 DNS.
+    source_type: free_api
+    category: dns_filter
+    mode: lookup
+    access: open
+    status: active
+    consumes: *id007
+    produces: *id008
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: reversewhois_io
+    name: ReverseWhois
+    url: https://www.reversewhois.io/
+    description: Reverse Whois lookups using reversewhois.io.
+    source_type: free_api
+    category: whois
+    mode: lookup
+    access: scrape
+    status: verify
+    consumes:
+      - person
+      - company
+      - email
+    produces:
+      - domain
+    geo: derived
+    layer: corporate
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: riddler
+    name: F-Secure Riddler.io
+    url: https://riddler.io/
+    description: Obtain network information from F-Secure Riddler.io API.
+    source_type: commercial_api
+    category: internet_scan
+    mode: lookup
+    access: dead
+    status: defunct
+    consumes: *id031
+    produces: &id044
+      - open_port
+      - software
+      - vulnerability
+      - hostname
+      - geo_point
+    geo: direct
+    layer: infrastructure
+    phase: 4
+    priority: normal
+    replacement:
+      - scanner
+      - pdns
+    notes: Riddler.io was retired by F-Secure/WithSecure.
+  - id: ripe
+    name: RIPE
+    url: https://www.ripe.net/
+    description: Queries the RIPE registry (includes ARIN data) to identify netblocks and other info.
+    source_type: free_api
+    category: network_registry
+    mode: lookup
+    access: open
+    status: active
+    consumes: *id043
+    produces:
+      - netblock
+      - asn
+      - company
+      - physical_address
+      - email
+    geo: derived
+    layer: infrastructure
+    phase: 1
+    priority: high
+    replacement: *id001
+    notes: RIPEstat Data API (also proxies ARIN/APNIC/etc. via RIR aggregation) plus RDAP.
+  - id: riskiq
+    name: RiskIQ
+    url: https://community.riskiq.com/
+    description: Obtain information from RiskIQ's (formerly PassiveTotal) Passive DNS and Passive SSL databases.
+    source_type: tiered_api
+    category: passive_dns
+    mode: lookup
+    access: dead
+    status: defunct
+    consumes: *id032
+    produces: *id021
+    geo: derived
+    layer: infrastructure
+    phase: 3
+    priority: normal
+    replacement:
+      - pdns
+    notes: Community API sunset after the Microsoft acquisition (now Defender TI).
+  - id: robtex
+    name: Robtex
+    url: https://www.robtex.com/
+    description: Search Robtex.com for hosts sharing the same IP.
+    source_type: free_api
+    category: passive_dns
+    mode: lookup
+    access: open
+    status: active
+    consumes:
+      - ip
+      - netblock
+      - domain
+      - hostname
+      - asn
+    produces:
+      - hostname
+      - ip
+      - asn
+      - netblock
+    geo: derived
+    layer: infrastructure
+    phase: 1
+    priority: high
+    replacement: *id001
+  - id: s3_bucket_finder
+    name: Amazon S3 Bucket Finder
+    url: https://aws.amazon.com/s3/
+    description: >-
+      Search for potential Amazon S3 buckets associated with the target and attempt to list their contents.
+    source_type: free_api
+    category: cloud_storage
+    mode: lookup
+    access: open
+    status: active
+    consumes: *id022
+    produces: *id023
+    geo: none
+    layer: null
+    phase: 1
+    priority: high
+    replacement: *id001
+    notes: >-
+      Name-permutation brute force against s3.amazonaws.com; lists public buckets. Merge into bucket_hunter.
+  - id: searchcode
+    name: searchcode
+    url: https://searchcode.com/
+    description: Search searchcode for code repositories mentioning the target domain.
+    source_type: free_api
+    category: code_search
+    mode: lookup
+    access: open
+    status: active
+    consumes:
+      - domain
+      - email
+    produces: *id026
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: securitytrails
+    name: SecurityTrails
+    url: https://securitytrails.com/
+    description: Obtain Passive DNS and other information from SecurityTrails
+    source_type: tiered_api
+    category: passive_dns
+    mode: lookup
+    access: freemium
+    status: active
+    consumes: *id032
+    produces:
+      - hostname
+      - dns_record
+      - whois_record
+      - ip
+    geo: derived
+    layer: infrastructure
+    phase: 3
+    priority: normal
+    replacement:
+      - pdns
+      - whois_archive
+      - subdomain_engine
+    notes: 'Free: 50 queries/month.'
+  - id: seon
+    name: Seon
+    url: https://seon.io/
+    description: Queries seon.io to gather intelligence about IP Addresses, email addresses, and phone numbers
+    source_type: commercial_api
+    category: email
+    mode: lookup
+    access: paid
+    status: active
+    consumes:
+      - email
+      - phone
+      - ip
+    produces:
+      - person
+      - social_profile
+      - verdict
+      - phone_info
+    geo: none
+    layer: null
+    phase: 4
+    priority: normal
+    replacement:
+      - email_intel
+      - phone_intel
+      - social_engine
+      - threat_scoring
+  - id: shodan
+    name: SHODAN
+    url: https://www.shodan.io/
+    description: Obtain information from SHODAN about identified IP addresses.
+    source_type: tiered_api
+    category: internet_scan
+    mode: lookup
+    access: paid
+    status: active
+    consumes: *id031
+    produces: *id044
+    geo: direct
+    layer: infrastructure
+    phase: 3
+    priority: high
+    replacement:
+      - scanner
+    notes: Free key allows host lookups only at a tiny rate; search requires a paid membership.
+  - id: similar_domains
+    name: Similar Domain Finder
+    url: null
+    description: Search various sources to identify similar looking domain names, for instance squatted domains.
+    source_type: internal
+    category: domain_similarity
+    mode: lookup
+    access: local
+    status: active
+    consumes: &id046
+      - domain
+    produces:
+      - similar_domain
+      - domain
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+    notes: Permutation engine (dnstwist-compatible) cross-checked against CT logs and zone files.
+  - id: skymem
+    name: Skymem
+    url: http://www.skymem.info/
+    description: Look up e-mail addresses on Skymem.
+    source_type: free_api
+    category: email
+    mode: lookup
+    access: scrape
+    status: verify
+    consumes:
+      - domain
+      - email
+    produces:
+      - email
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: slideshare
+    name: SlideShare
+    url: https://www.slideshare.net
+    description: Gather name and location from SlideShare profiles.
+    source_type: free_api
+    category: social
+    mode: lookup
+    access: scrape
+    status: verify
+    consumes:
+      - username
+      - person
+    produces:
+      - social_profile
+      - person
+      - physical_address
+    geo: derived
+    layer: social
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: snov
+    name: Snov
+    url: https://snov.io/
+    description: Gather available email IDs from identified domains
+    source_type: tiered_api
+    category: email
+    mode: lookup
+    access: freemium
+    status: active
+    consumes:
+      - domain
+    produces:
+      - email
+      - person
+    geo: none
+    layer: null
+    phase: 3
+    priority: normal
+    replacement:
+      - email_intel
+  - id: social_network_identifier
+    name: Social Network Identifier
+    url: null
+    description: Identify presence on social media networks such as LinkedIn, Twitter and others.
+    source_type: internal
+    category: social
+    mode: extract
+    access: local
+    status: active
+    consumes:
+      - url
+      - raw_content
+    produces:
+      - social_profile
+    geo: derived
+    layer: social
+    phase: 1
+    priority: high
+    replacement: *id001
+  - id: social_profile_finder
+    name: Social Media Profile Finder
+    url: https://developers.google.com/custom-search
+    description: Tries to discover the social media profiles for human names identified.
+    source_type: tiered_api
+    category: people
+    mode: lookup
+    access: freemium
+    status: active
+    consumes:
+      - person
+    produces:
+      - social_profile
+    geo: none
+    layer: null
+    phase: 3
+    priority: normal
+    replacement:
+      - meta_search
+      - social_engine
+    notes: Uses Google CSE quota.
+  - id: sociallinks
+    name: Social Links
+    url: https://sociallinks.io/
+    description: Queries SocialLinks.io to gather intelligence from social media platforms and dark web.
+    source_type: commercial_api
+    category: social
+    mode: lookup
+    access: paid
+    status: active
+    consumes:
+      - email
+      - phone
+      - username
+      - person
+      - domain
+      - btc_address
+    produces:
+      - social_profile
+      - person
+      - darkweb_mention
+      - geo_point
+    geo: derived
+    layer: social
+    phase: 4
+    priority: normal
+    replacement:
+      - social_engine
+      - darkweb_crawler
+  - id: sorbs
+    name: SORBS
+    url: http://www.sorbs.net/
+    description: Query the SORBS database for open relays, open proxies, vulnerable servers, etc.
+    source_type: free_api
+    category: spam_blocklist
+    mode: lookup
+    access: dead
+    status: defunct
+    consumes: *id009
+    produces: *id010
+    geo: derived
+    layer: threat
+    phase: 3
+    priority: normal
+    replacement:
+      - threat_scoring
+    notes: SORBS was shut down in June 2024.
+  - id: spamcop
+    name: SpamCop
+    url: https://www.spamcop.net/
+    description: Check if a netblock or IP address is in the SpamCop database.
+    source_type: free_api
+    category: spam_blocklist
+    mode: lookup
+    access: open
+    status: active
+    consumes: *id009
+    produces: *id010
+    geo: derived
+    layer: threat
+    phase: 1
+    priority: normal
+    replacement: *id001
+    notes: bl.spamcop.net DNSBL.
+  - id: spamhaus_zen
+    name: Spamhaus Zen
+    url: https://www.spamhaus.org/
+    description: Check if a netblock or IP address is in the Spamhaus Zen database.
+    source_type: free_api
+    category: spam_blocklist
+    mode: lookup
+    access: open
+    status: active
+    consumes: *id009
+    produces: *id010
+    geo: derived
+    layer: threat
+    phase: 1
+    priority: normal
+    replacement: *id001
+    notes: Public mirrors for low-volume non-commercial use; DQS key otherwise.
+  - id: spur
+    name: spur.us
+    url: https://spur.us/
+    description: Obtain information about any malicious activities involving IP addresses found
+    source_type: commercial_api
+    category: ip_reputation
+    mode: lookup
+    access: paid
+    status: active
+    consumes:
+      - ip
+    produces:
+      - verdict
+      - geo_point
+      - anonymity_service
+    geo: derived
+    layer: threat
+    phase: 4
+    priority: normal
+    replacement:
+      - threat_scoring
+      - geoip
+    notes: Replacement focuses on VPN/proxy/residential-proxy attribution from exit-node enumeration.
+  - id: spyonweb
+    name: SpyOnWeb
+    url: http://spyonweb.com/
+    description: >-
+      Search SpyOnWeb for hosts sharing the same IP address, Google Analytics code, or Google Adsense code.
+    source_type: tiered_api
+    category: web_tech
+    mode: lookup
+    access: freemium
+    status: active
+    consumes:
+      - ip
+      - domain
+      - web_analytics_id
+    produces:
+      - domain
+      - web_analytics_id
+      - ip
+    geo: none
+    layer: null
+    phase: 3
+    priority: normal
+    replacement:
+      - pdns
+      - tech_fingerprint
+    notes: 'Replacement: index analytics/adsense IDs from our own crawls and CommonCrawl.'
+  - id: ssl_analyzer
+    name: SSL Certificate Analyzer
+    url: null
+    description: Gather information about SSL certificates used by the target's HTTPS sites.
+    source_type: internal
+    category: certificates
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - hostname
+      - ip
+    produces:
+      - certificate
+      - hostname
+      - verdict
+    geo: none
+    layer: null
+    phase: 2
+    priority: high
+    replacement: *id001
+  - id: stackoverflow
+    name: StackOverflow
+    url: https://www.stackexchange.com
+    description: Search StackOverflow for any mentions of a target domain. Returns potentially related information.
+    source_type: tiered_api
+    category: code_search
+    mode: lookup
+    access: key_free
+    status: active
+    consumes:
+      - domain
+    produces:
+      - url
+      - username
+      - raw_content
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement:
+      - local_reimpl
+    notes: StackExchange API is free with a key; reclassified as free.
+  - id: stevenblack_hosts
+    name: Steven Black Hosts
+    url: https://github.com/StevenBlack/hosts
+    description: Check if a domain is malicious (malware or adware) according to Steven Black Hosts list.
+    source_type: free_api
+    category: domain_reputation
+    mode: lookup
+    access: open
+    status: active
+    consumes:
+      - domain
+      - hostname
+    produces: *id011
+    geo: derived
+    layer: threat
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: strange_headers
+    name: Strange Header Identifier
+    url: null
+    description: Obtain non-standard HTTP headers returned by web servers.
+    source_type: internal
+    category: web_recon
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - http_header
+    produces:
+      - http_header
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+  - id: subdomain_takeover
+    name: Subdomain Takeover Checker
+    url: null
+    description: Check if affiliated subdomains are vulnerable to takeover.
+    source_type: internal
+    category: web_recon
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - hostname
+      - dns_record
+    produces:
+      - vulnerability
+    geo: none
+    layer: null
+    phase: 2
+    priority: high
+    replacement: *id001
+    notes: can-i-take-over-xyz fingerprints for dangling CNAMEs/NS.
+  - id: sublist3r
+    name: Sublist3r PassiveDNS
+    url: https://api.sublist3r.com
+    description: Passive subdomain enumeration using Sublist3r's API
+    source_type: free_api
+    category: subdomain_enum
+    mode: lookup
+    access: dead
+    status: defunct
+    consumes: *id015
+    produces: *id016
+    geo: derived
+    layer: infrastructure
+    phase: 3
+    priority: normal
+    replacement:
+      - subdomain_engine
+  - id: surbl
+    name: SURBL
+    url: http://www.surbl.org/
+    description: Check if a netblock, IP address or domain is in the SURBL blacklist.
+    source_type: free_api
+    category: spam_blocklist
+    mode: lookup
+    access: open
+    status: active
+    consumes:
+      - ip
+      - netblock
+      - domain
+    produces: *id010
+    geo: derived
+    layer: threat
+    phase: 1
+    priority: normal
+    replacement: *id001
+    notes: Domain-oriented DNSBL (multi.surbl.org).
+  - id: talos
+    name: Talos Intelligence
+    url: https://talosintelligence.com/
+    description: Check if a netblock or IP address is malicious according to TalosIntelligence.
+    source_type: free_api
+    category: ip_reputation
+    mode: lookup
+    access: scrape
+    status: verify
+    consumes: *id003
+    produces: *id006
+    geo: derived
+    layer: threat
+    phase: 1
+    priority: normal
+    replacement: *id001
+    notes: No documented public API.
+  - id: textmagic
+    name: TextMagic
+    url: https://www.textmagic.com/
+    description: Obtain phone number type from TextMagic API
+    source_type: tiered_api
+    category: phone
+    mode: lookup
+    access: paid
+    status: active
+    consumes: *id036
+    produces:
+      - phone_info
+    geo: derived
+    layer: social
+    phase: 3
+    priority: normal
+    replacement:
+      - phone_intel
+  - id: threatcrowd
+    name: ThreatCrowd
+    url: https://www.threatcrowd.org
+    description: Obtain information from ThreatCrowd about identified IP addresses, domains and e-mail addresses.
+    source_type: free_api
+    category: threat_intel_platform
+    mode: lookup
+    access: dead
+    status: defunct
+    consumes: *id041
+    produces: &id045
+      - verdict
+      - hostname
+      - dns_record
+      - hash
+    geo: derived
+    layer: threat
+    phase: 3
+    priority: normal
+    replacement:
+      - threat_scoring
+      - pdns
+    notes: Service shut down.
+  - id: threatfox
+    name: ThreatFox
+    url: https://threatfox.abuse.ch
+    description: Check if an IP address is malicious according to ThreatFox.
+    source_type: free_api
+    category: ip_reputation
+    mode: lookup
+    access: key_free
+    status: active
+    consumes:
+      - ip
+      - domain
+      - hostname
+      - url
+      - hash
+    produces:
+      - verdict
+      - malware_family
+    geo: derived
+    layer: threat
+    phase: 1
+    priority: high
+    replacement: *id001
+    notes: abuse.ch Auth-Key.
+  - id: threatjammer
+    name: Threat Jammer
+    url: https://threatjammer.com
+    description: Check if an IP address is malicious according to ThreatJammer.com
+    source_type: tiered_api
+    category: ip_reputation
+    mode: lookup
+    access: freemium
+    status: active
+    consumes:
+      - ip
+    produces:
+      - verdict
+      - reputation
+    geo: derived
+    layer: threat
+    phase: 3
+    priority: normal
+    replacement:
+      - threat_scoring
+  - id: threatminer
+    name: ThreatMiner
+    url: https://www.threatminer.org/
+    description: Obtain information from ThreatMiner's database for passive DNS and threat intelligence.
+    source_type: free_api
+    category: threat_intel_platform
+    mode: lookup
+    access: open
+    status: verify
+    consumes:
+      - ip
+      - domain
+      - hash
+      - email
+    produces: *id045
+    geo: derived
+    layer: threat
+    phase: 1
+    priority: normal
+    replacement: *id001
+    notes: Unreliable uptime.
+  - id: tld_searcher
+    name: TLD Searcher
+    url: null
+    description: Search all Internet TLDs for domains with the same name as the target (this can be very slow.)
+    source_type: internal
+    category: domain_similarity
+    mode: lookup
+    access: local
+    status: active
+    consumes: *id046
+    produces:
+      - domain
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+    notes: Uses the IANA TLD list; batched resolution through dns_resolver.
+  - id: tool_cmseek
+    name: Tool - CMSeeK
+    url: https://github.com/Tuhinshubhra/CMSeeK
+    description: Identify what Content Management System (CMS) might be used.
+    source_type: tool
+    category: web_tech
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - url
+      - hostname
+      - domain
+    produces: &id047
+      - software
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+  - id: tool_dnstwist
+    name: Tool - DNSTwist
+    url: https://github.com/elceef/dnstwist
+    description: >-
+      Identify bit-squatting, typo and other similar domains to the target using a local DNSTwist installation.
+    source_type: tool
+    category: domain_similarity
+    mode: lookup
+    access: local
+    status: active
+    consumes: *id046
+    produces:
+      - similar_domain
+      - ip
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+  - id: tool_nbtscan
+    name: Tool - nbtscan
+    url: http://www.unixwiz.net/tools/nbtscan.html
+    description: Scans for open NETBIOS nameservers on your target's network.
+    source_type: tool
+    category: vuln_scan
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - ip
+      - netblock
+    produces:
+      - hostname
+      - open_port
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+    requires_authorization: true
+  - id: tool_nmap
+    name: Tool - Nmap
+    url: https://nmap.org/
+    description: Identify what Operating System might be used.
+    source_type: tool
+    category: vuln_scan
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - ip
+      - hostname
+      - netblock
+    produces:
+      - open_port
+      - software
+      - operating_system
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+    requires_authorization: true
+  - id: tool_nuclei
+    name: Tool - Nuclei
+    url: https://nuclei.projectdiscovery.io/
+    description: Fast and customisable vulnerability scanner.
+    source_type: tool
+    category: vuln_scan
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - url
+      - hostname
+      - ip
+    produces: *id042
+    geo: none
+    layer: null
+    phase: 2
+    priority: high
+    replacement: *id001
+    requires_authorization: true
+  - id: tool_onesixtyone
+    name: Tool - onesixtyone
+    url: https://github.com/trailofbits/onesixtyone
+    description: Fast scanner to find publicly exposed SNMP services.
+    source_type: tool
+    category: vuln_scan
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - ip
+      - netblock
+    produces:
+      - open_port
+      - software
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+    requires_authorization: true
+  - id: tool_retirejs
+    name: Tool - Retire.js
+    url: http://retirejs.github.io/retire.js/
+    description: Scanner detecting the use of JavaScript libraries with known vulnerabilities
+    source_type: tool
+    category: web_tech
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - url
+    produces:
+      - software
+      - vulnerability
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+  - id: tool_snallygaster
+    name: Tool - snallygaster
+    url: https://github.com/hannob/snallygaster
+    description: Finds file leaks and other security problems on HTTP servers.
+    source_type: tool
+    category: vuln_scan
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - hostname
+      - url
+    produces:
+      - url
+      - vulnerability
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+    requires_authorization: true
+  - id: tool_testssl
+    name: Tool - testssl.sh
+    url: https://testssl.sh
+    description: Identify various TLS/SSL weaknesses, including Heartbleed, CRIME and ROBOT.
+    source_type: tool
+    category: certificates
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - hostname
+      - ip
+    produces:
+      - vulnerability
+      - certificate
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+  - id: tool_trufflehog
+    name: Tool - TruffleHog
+    url: https://github.com/trufflesecurity/truffleHog
+    description: >-
+      Searches through git repositories for high entropy strings and secrets, digging deep into commit history.
+    source_type: tool
+    category: code_search
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - code_repo
+      - url
+    produces:
+      - secret
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+  - id: tool_wafw00f
+    name: Tool - WAFW00F
+    url: https://github.com/EnableSecurity/wafw00f
+    description: Identify what web application firewall (WAF) is in use on the specified website.
+    source_type: tool
+    category: web_tech
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - url
+      - hostname
+    produces: *id047
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+  - id: tool_wappalyzer
+    name: Tool - Wappalyzer
+    url: https://www.wappalyzer.com/
+    description: Wappalyzer indentifies technologies on websites.
+    source_type: tool
+    category: web_tech
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - url
+    produces: *id047
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+    notes: Wappalyzer closed its source in 2023; use the community-maintained fingerprint set (webappanalyzer).
+  - id: tool_whatweb
+    name: Tool - WhatWeb
+    url: https://github.com/urbanadventurer/whatweb
+    description: Identify what software is in use on the specified website.
+    source_type: tool
+    category: web_tech
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - url
+      - hostname
+    produces: *id047
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+  - id: tor_exit_nodes
+    name: TOR Exit Nodes
+    url: https://metrics.torproject.org/
+    description: Check if an IP adddress or netblock appears on the Tor Metrics exit node list.
+    source_type: free_api
+    category: proxy_tor
+    mode: lookup
+    access: open
+    status: active
+    consumes: *id048
+    produces:
+      - verdict
+      - tor_relay
+    geo: direct
+    layer: tor
+    phase: 1
+    priority: high
+    replacement: *id001
+    cadence: hourly
+    notes: >-
+      Exit list plus Onionoo relay details (with geolocation) refreshed hourly; also runs as a feed for the tor layer.
+  - id: torch
+    name: TORCH
+    url: https://torchsearch.wordpress.com/
+    description: Search Tor 'TORCH' search engine for mentions of the target domain.
+    source_type: free_api
+    category: dark_web
+    mode: lookup
+    access: scrape
+    status: verify
+    consumes:
+      - domain
+    produces: *id038
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+    notes: Onion address changes frequently.
+  - id: trashpanda
+    name: Trashpanda
+    url: https://got-hacked.wtf
+    description: Queries Trashpanda to gather intelligence about mentions of target in pastesites
+    source_type: tiered_api
+    category: paste_leak
+    mode: lookup
+    access: freemium
+    status: verify
+    consumes: *id049
+    produces: *id040
+    geo: none
+    layer: null
+    phase: 3
+    priority: normal
+    replacement:
+      - paste_monitor
+  - id: trumail
+    name: Trumail
+    url: https://trumail.io/
+    description: Check whether an email is disposable
+    source_type: free_api
+    category: email
+    mode: lookup
+    access: dead
+    status: defunct
+    consumes:
+      - email
+    produces:
+      - email_verdict
+    geo: none
+    layer: null
+    phase: 3
+    priority: normal
+    replacement:
+      - email_intel
+  - id: twilio
+    name: Twilio
+    url: https://www.twilio.com/
+    description: >-
+      Obtain information from Twilio about phone numbers. Ensure you have the Caller Name add-on installed in Twilio.
+    source_type: tiered_api
+    category: phone
+    mode: lookup
+    access: paid
+    status: active
+    consumes: *id036
+    produces:
+      - phone_info
+    geo: derived
+    layer: social
+    phase: 3
+    priority: normal
+    replacement:
+      - phone_intel
+    notes: Lookup v2 with caller-name add-on is billed per query.
+  - id: twitter
+    name: Twitter
+    url: https://twitter.com/
+    description: Gather name and location from Twitter profiles.
+    source_type: free_api
+    category: social
+    mode: lookup
+    access: paid
+    status: changed
+    consumes:
+      - username
+      - person
+      - domain
+    produces:
+      - social_profile
+      - person
+      - physical_address
+    geo: derived
+    layer: social
+    phase: 3
+    priority: normal
+    replacement:
+      - social_engine
+    notes: >-
+      X API free tier is write-only; read access is paid. Replacement scrapes public profile pages via the social_engine adapter.
+  - id: uceprotect
+    name: UCEPROTECT
+    url: http://www.uceprotect.net/
+    description: Check if a netblock or IP address is in the UCEPROTECT database.
+    source_type: free_api
+    category: spam_blocklist
+    mode: lookup
+    access: open
+    status: active
+    consumes: *id009
+    produces: *id010
+    geo: derived
+    layer: threat
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: urlscan
+    name: URLScan.io
+    url: https://urlscan.io/
+    description: Search URLScan.io cache for domain information.
+    source_type: free_api
+    category: web_archive
+    mode: lookup
+    access: key_free
+    status: active
+    consumes:
+      - domain
+      - hostname
+      - ip
+      - url
+    produces:
+      - url
+      - hostname
+      - ip
+      - hash
+      - software
+      - verdict
+    geo: none
+    layer: null
+    phase: 1
+    priority: high
+    replacement: *id001
+  - id: usgs
+    name: USGS
+    url: https://earthquake.usgs.gov/
+    description: Obtain real-time earthquake and seismic activity data from the USGS Earthquake Hazards Program.
+    source_type: free_api
+    category: geo_feed
+    mode: feed
+    access: open
+    status: active
+    consumes: *id002
+    produces:
+      - seismic_event
+    geo: direct
+    layer: seismic
+    phase: 1
+    priority: high
+    replacement: *id001
+    cadence: 1m
+    notes: >-
+      GeoJSON summary feeds (all_hour/all_day/all_week/all_month) refreshed every minute; FDSN event service for history.
+  - id: venmo
+    name: Venmo
+    url: https://venmo.com/
+    description: Gather user information from Venmo API.
+    source_type: free_api
+    category: social
+    mode: lookup
+    access: dead
+    status: verify
+    consumes: *id050
+    produces:
+      - social_profile
+      - person
+    geo: derived
+    layer: social
+    phase: 1
+    priority: normal
+    replacement:
+      - social_engine
+    notes: Public transaction API was closed; profile pages may still be scrapeable.
+  - id: viewdns
+    name: ViewDNS.info
+    url: https://viewdns.info/
+    description: Identify co-hosted websites and perform reverse Whois lookups using ViewDNS.info.
+    source_type: tiered_api
+    category: whois
+    mode: lookup
+    access: freemium
+    status: active
+    consumes:
+      - ip
+      - domain
+      - email
+      - person
+    produces:
+      - domain
+      - hostname
+      - whois_record
+    geo: derived
+    layer: corporate
+    phase: 3
+    priority: normal
+    replacement:
+      - whois_archive
+      - pdns
+  - id: virustotal
+    name: VirusTotal
+    url: https://www.virustotal.com/
+    description: Obtain information from VirusTotal about identified IP addresses.
+    source_type: tiered_api
+    category: threat_intel_platform
+    mode: lookup
+    access: freemium
+    status: active
+    consumes: *id041
+    produces: *id045
+    geo: derived
+    layer: threat
+    phase: 3
+    priority: high
+    replacement:
+      - threat_scoring
+      - pdns
+    notes: 'Free key: 4 req/min, 500/day.'
+  - id: voipbl
+    name: VoIP Blacklist (VoIPBL)
+    url: https://voipbl.org/
+    description: Check if an IP address or netblock is malicious according to VoIP Blacklist (VoIPBL).
+    source_type: free_api
+    category: spam_blocklist
+    mode: lookup
+    access: open
+    status: active
+    consumes: *id009
+    produces: *id010
+    geo: derived
+    layer: threat
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: vxvault
+    name: VXVault.net
+    url: http://vxvault.net/
+    description: Check if a domain or IP address is malicious according to VXVault.net.
+    source_type: free_api
+    category: domain_reputation
+    mode: lookup
+    access: open
+    status: active
+    consumes:
+      - domain
+      - ip
+      - url
+    produces: *id011
+    geo: derived
+    layer: threat
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: web_analytics_extractor
+    name: Web Analytics Extractor
+    url: null
+    description: Identify web analytics IDs in scraped webpages and DNS TXT records.
+    source_type: internal
+    category: extractor
+    mode: extract
+    access: local
+    status: active
+    consumes:
+      - raw_content
+      - dns_record
+    produces:
+      - web_analytics_id
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: web_framework_identifier
+    name: Web Framework Identifier
+    url: null
+    description: Identify the usage of popular web frameworks like jQuery, YUI and others.
+    source_type: internal
+    category: web_tech
+    mode: extract
+    access: local
+    status: active
+    consumes:
+      - raw_content
+      - url
+    produces: *id047
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+  - id: web_server_identifier
+    name: Web Server Identifier
+    url: null
+    description: Obtain web server banners to identify versions of web servers being used.
+    source_type: internal
+    category: web_tech
+    mode: extract
+    access: local
+    status: active
+    consumes:
+      - http_header
+    produces: *id047
+    geo: none
+    layer: null
+    phase: 2
+    priority: normal
+    replacement: *id001
+  - id: web_spider
+    name: Web Spider
+    url: null
+    description: Spidering of web-pages to extract content for searching.
+    source_type: internal
+    category: web_recon
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - url
+      - hostname
+      - domain
+    produces:
+      - url
+      - raw_content
+      - http_header
+      - hostname
+    geo: none
+    layer: null
+    phase: 1
+    priority: high
+    replacement: *id001
+    notes: >-
+      Core module: polite async crawler (robots.txt aware, per-host concurrency, depth/page limits) feeding all extractors.
+  - id: whatcms
+    name: WhatCMS
+    url: https://whatcms.org/
+    description: Check web technology using WhatCMS.org API.
+    source_type: tiered_api
+    category: web_tech
+    mode: lookup
+    access: freemium
+    status: active
+    consumes:
+      - domain
+      - url
+    produces: *id047
+    geo: none
+    layer: null
+    phase: 3
+    priority: normal
+    replacement:
+      - tech_fingerprint
+  - id: whois
+    name: Whois
+    url: null
+    description: Perform a WHOIS look-up on domain names and owned netblocks.
+    source_type: internal
+    category: whois
+    mode: lookup
+    access: local
+    status: active
+    consumes:
+      - domain
+      - netblock
+      - ip
+    produces: *id051
+    geo: derived
+    layer: corporate
+    phase: 1
+    priority: high
+    replacement: *id001
+    notes: >-
+      Core module: RDAP first (structured, rate-limit friendly), legacy WHOIS port 43 fallback with referral following.
+  - id: whoisology
+    name: Whoisology
+    url: https://whoisology.com/
+    description: Reverse Whois lookups using Whoisology.com.
+    source_type: commercial_api
+    category: whois
+    mode: lookup
+    access: paid
+    status: active
+    consumes:
+      - email
+      - person
+      - company
+      - domain
+    produces:
+      - domain
+      - whois_record
+    geo: derived
+    layer: corporate
+    phase: 4
+    priority: normal
+    replacement:
+      - whois_archive
+  - id: whoxy
+    name: Whoxy
+    url: https://www.whoxy.com/
+    description: Reverse Whois lookups using Whoxy.com.
+    source_type: commercial_api
+    category: whois
+    mode: lookup
+    access: paid
+    status: active
+    consumes:
+      - email
+      - person
+      - company
+      - domain
+    produces:
+      - domain
+      - whois_record
+    geo: derived
+    layer: corporate
+    phase: 4
+    priority: normal
+    replacement:
+      - whois_archive
+  - id: wigle
+    name: WiGLE
+    url: https://wigle.net/
+    description: Query WiGLE to identify nearby WiFi access points.
+    source_type: free_api
+    category: geo_feed
+    mode: lookup
+    access: freemium
+    status: active
+    consumes:
+      - geo_point
+      - wifi_ap
+      - keyword
+    produces:
+      - wifi_ap
+    geo: direct
+    layer: wifi
+    phase: 1
+    priority: high
+    replacement: *id001
+    cadence: on_demand
+    notes: >-
+      Free account with a small daily query quota; bounding-box searches populate the wifi layer for areas of interest.
+  - id: wikileaks
+    name: Wikileaks
+    url: https://wikileaks.org/
+    description: Search Wikileaks for mentions of domain names and e-mail addresses.
+    source_type: free_api
+    category: paste_leak
+    mode: lookup
+    access: scrape
+    status: active
+    consumes:
+      - domain
+      - email
+    produces:
+      - url
+      - raw_content
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: wikipedia_edits
+    name: Wikipedia Edits
+    url: https://www.wikipedia.org/
+    description: Identify edits to Wikipedia articles made from a given IP address or username.
+    source_type: free_api
+    category: social
+    mode: lookup
+    access: open
+    status: active
+    consumes:
+      - ip
+      - username
+    produces:
+      - url
+      - username
+    geo: derived
+    layer: social
+    phase: 1
+    priority: normal
+    replacement: *id001
+  - id: windy_saildrone
+    name: Saildrone / Windy
+    url: https://api.windy.com/
+    description: >-
+      Obtain weather and atmospheric data from Saildrone ocean observations and the Windy API, updated hourly.
+    source_type: tiered_api
+    category: geo_feed
+    mode: feed
+    access: freemium
+    status: active
+    consumes: *id002
+    produces:
+      - weather_obs
+    geo: direct
+    layer: weather
+    phase: 3
+    priority: normal
+    replacement:
+      - weather_service
+    cadence: hourly
+    notes: >-
+      Windy Point Forecast API has a free key; Saildrone has no public API. Replacement uses Open-Meteo, NOAA GFS, NDBC buoys
+      and Argo floats.
+  - id: xforce
+    name: XForce Exchange
+    url: https://exchange.xforce.ibmcloud.com/
+    description: Obtain IP reputation and passive DNS information from IBM X-Force Exchange.
+    source_type: tiered_api
+    category: threat_intel_platform
+    mode: lookup
+    access: freemium
+    status: active
+    consumes:
+      - ip
+      - netblock
+      - domain
+      - hostname
+      - url
+      - hash
+    produces: *id045
+    geo: derived
+    layer: threat
+    phase: 3
+    priority: normal
+    replacement:
+      - threat_scoring
+      - pdns
+  - id: yandex_dns
+    name: Yandex DNS
+    url: https://yandex.com/
+    description: Check if a host would be blocked by Yandex DNS.
+    source_type: free_api
+    category: dns_filter
+    mode: lookup
+    access: open
+    status: verify
+    consumes: *id007
+    produces: *id008
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+    notes: Yandex.DNS 'Safe/Family' public resolvers may have been discontinued; verify.
+  - id: zetalytics
+    name: Zetalytics
+    url: https://zetalytics.com/
+    description: Query the Zetalytics database for hosts on your target domain(s).
+    source_type: tiered_api
+    category: passive_dns
+    mode: lookup
+    access: paid
+    status: active
+    consumes: *id032
+    produces: *id021
+    geo: derived
+    layer: infrastructure
+    phase: 3
+    priority: normal
+    replacement:
+      - pdns
+  - id: zone_h
+    name: Zone-H Defacement Check
+    url: https://zone-h.org/
+    description: Check if a hostname/domain appears on the zone-h.org 'special defacements' RSS feed.
+    source_type: free_api
+    category: vuln_scan
+    mode: lookup
+    access: open
+    status: active
+    consumes:
+      - hostname
+      - domain
+    produces: *id042
+    geo: none
+    layer: null
+    phase: 1
+    priority: normal
+    replacement: *id001
+    notes: RSS feed of special defacements.
+  - id: zonefile_io
+    name: ZoneFile.io
+    url: https://zonefiles.io
+    description: Search ZoneFiles.io Domain query API for domain information.
+    source_type: tiered_api
+    category: whois
+    mode: lookup
+    access: paid
+    status: active
+    consumes:
+      - domain
+    produces:
+      - domain
+      - whois_record
+      - dns_record
+    geo: derived
+    layer: corporate
+    phase: 3
+    priority: normal
+    replacement:
+      - pdns
+      - whois_archive
+    notes: Replacement ingests ICANN CZDS zone files directly (free with an approved account).

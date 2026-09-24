@@ -1,0 +1,101 @@
+# Canonical entity types. Every `consumes` / `produces` value in modules.yaml must appear here,
+# and backend/osint_board/entities/types.py must stay in sync (tests enforce both).
+#
+# kind:
+#   identifier  a thing you can pivot on (ip, domain, email, ...)
+#   record      structured lookup output attached to an identifier
+#   content     raw material extractors run over
+#   verdict     an assessment about another entity (malicious, blocked, disposable, ...)
+#   asset       something discovered on a target (open port, software, vulnerability)
+#   geo         a place (point, address, country, region)
+#   track       a moving object with a time series of positions
+#   event       something that happened somewhere at some time
+#   object      a discovered artefact (profile, repo, bucket, paste, ...)
+#
+# geo_resolution: how the geo pipeline places this type on the globe (docs/05-globe.md)
+#   direct       the entity carries coordinates
+#   via_ip       resolve to IP(s) then geolocate
+#   via_address  geocode a postal address
+#   via_registry registry / WHOIS contact address
+#   via_region   country or region centroid (low precision)
+#   via_profile  free-text location on a profile, geocoded
+#   none         never placed on the globe
+version: 1
+entities:
+  - {id: ip, label: IP address, kind: identifier, geo_resolution: via_ip, description: IPv4 or IPv6 address, example: "203.0.113.7"}
+  - {id: netblock, label: Netblock, kind: identifier, geo_resolution: via_registry, description: CIDR prefix, example: "203.0.113.0/24"}
+  - {id: asn, label: ASN, kind: identifier, geo_resolution: via_registry, description: Autonomous system number, example: "AS13335"}
+  - {id: domain, label: Domain, kind: identifier, geo_resolution: via_ip, description: Registrable domain name, example: "example.com"}
+  - {id: hostname, label: Hostname, kind: identifier, geo_resolution: via_ip, description: Fully qualified host / subdomain, example: "mail.example.com"}
+  - {id: url, label: URL, kind: identifier, geo_resolution: via_ip, description: Web address, example: "https://example.com/login"}
+  - {id: email, label: E-mail address, kind: identifier, geo_resolution: none, example: "alice@example.com"}
+  - {id: phone, label: Phone number, kind: identifier, geo_resolution: via_region, description: E.164 phone number, example: "+14155552671"}
+  - {id: username, label: Username, kind: identifier, geo_resolution: none, example: "jdoe42"}
+  - {id: person, label: Person, kind: identifier, geo_resolution: none, description: Human name}
+  - {id: company, label: Company, kind: identifier, geo_resolution: via_address, description: Organisation name}
+  - {id: lei, label: LEI, kind: identifier, geo_resolution: via_address, description: Legal Entity Identifier (20 chars)}
+  - {id: keyword, label: Keyword, kind: identifier, geo_resolution: none, description: Free-text search term}
+  - {id: hash, label: File hash, kind: identifier, geo_resolution: none, description: MD5 / SHA-1 / SHA-256}
+  - {id: btc_address, label: Bitcoin address, kind: identifier, geo_resolution: none}
+  - {id: eth_address, label: Ethereum address, kind: identifier, geo_resolution: none}
+  - {id: iban, label: IBAN, kind: identifier, geo_resolution: via_region, description: International bank account number (country code prefix)}
+  - {id: credit_card, label: Credit card number, kind: identifier, geo_resolution: none, description: Stored masked (first 6 + last 4)}
+  - {id: pgp_key, label: PGP key, kind: identifier, geo_resolution: none}
+  - {id: web_analytics_id, label: Web analytics ID, kind: identifier, geo_resolution: none, example: "UA-12345-1 / G-XXXX / pub-123"}
+  - {id: certificate, label: TLS certificate, kind: record, geo_resolution: none}
+  - {id: dns_record, label: DNS record, kind: record, geo_resolution: none}
+  - {id: whois_record, label: WHOIS / RDAP record, kind: record, geo_resolution: via_registry}
+  - {id: phone_info, label: Phone metadata, kind: record, geo_resolution: via_region, description: carrier, line type, region}
+  - {id: email_pattern, label: E-mail pattern, kind: record, geo_resolution: none, example: "{first}.{last}@example.com"}
+  - {id: page_info, label: Web page facts, kind: record, geo_resolution: none, description: forms, password fields, scripts}
+  - {id: threat_report, label: Threat report, kind: record, geo_resolution: none, description: pulse / report / campaign reference}
+  - {id: crypto_balance, label: Wallet balance, kind: record, geo_resolution: none}
+  - {id: crypto_transaction, label: Crypto transaction, kind: record, geo_resolution: none}
+  - {id: attack_count, label: Attack count, kind: record, geo_resolution: none}
+  - {id: p2p_activity, label: P2P activity, kind: record, geo_resolution: none, description: torrent activity observed for an IP}
+  - {id: description, label: Description, kind: record, geo_resolution: none, description: free text summary}
+  - {id: search_result, label: Search result, kind: record, geo_resolution: none}
+  - {id: timestamp, label: Timestamp, kind: record, geo_resolution: none}
+  - {id: raw_content, label: Raw content, kind: content, geo_resolution: none, description: HTML / text fetched from a URL}
+  - {id: raw_file, label: Raw file, kind: content, geo_resolution: none, description: binary document / image}
+  - {id: http_header, label: HTTP header, kind: content, geo_resolution: none}
+  - {id: cookie, label: Cookie, kind: content, geo_resolution: none}
+  - {id: base64_string, label: Base64 string, kind: content, geo_resolution: none}
+  - {id: error_message, label: Error message, kind: content, geo_resolution: none}
+  - {id: verdict, label: Verdict, kind: verdict, geo_resolution: none, description: malicious / blocked / listed assessment with source and confidence}
+  - {id: reputation, label: Reputation score, kind: verdict, geo_resolution: none}
+  - {id: classification, label: Classification, kind: verdict, geo_resolution: none, example: "benign scanner / malicious / unknown"}
+  - {id: email_verdict, label: E-mail verdict, kind: verdict, geo_resolution: none, description: disposable / deliverable / role account}
+  - {id: anonymity_service, label: Anonymity service, kind: verdict, geo_resolution: none, description: VPN / proxy / Tor attribution}
+  - {id: malware_family, label: Malware family, kind: verdict, geo_resolution: none}
+  - {id: affiliate_link, label: Affiliate link, kind: verdict, geo_resolution: none, description: evidence that two domains are related}
+  - {id: open_port, label: Open port, kind: asset, geo_resolution: via_ip}
+  - {id: software, label: Software / technology, kind: asset, geo_resolution: none}
+  - {id: operating_system, label: Operating system, kind: asset, geo_resolution: none}
+  - {id: vulnerability, label: Vulnerability, kind: asset, geo_resolution: via_ip, description: CVE / template finding / defacement / takeover}
+  - {id: secret, label: Leaked secret, kind: asset, geo_resolution: none, description: stored as a fingerprint, never the value}
+  - {id: geo_point, label: Coordinates, kind: geo, geo_resolution: direct, example: "48.8566, 2.3522"}
+  - {id: physical_address, label: Postal address, kind: geo, geo_resolution: via_address}
+  - {id: country, label: Country, kind: geo, geo_resolution: via_region}
+  - {id: cloud_region, label: Cloud region, kind: geo, geo_resolution: via_region, example: "aws:eu-west-1"}
+  - {id: position, label: Position fix, kind: track, geo_resolution: direct, description: one timestamped position of a track}
+  - {id: vessel, label: Vessel, kind: track, geo_resolution: direct, description: MMSI-keyed ship track}
+  - {id: aircraft, label: Aircraft, kind: track, geo_resolution: direct, description: ICAO24-keyed aircraft track}
+  - {id: satellite, label: Satellite, kind: track, geo_resolution: direct, description: NORAD-keyed orbital element set}
+  - {id: seismic_event, label: Earthquake, kind: event, geo_resolution: direct}
+  - {id: fire_event, label: Thermal hotspot, kind: event, geo_resolution: direct}
+  - {id: conflict_event, label: Conflict event, kind: event, geo_resolution: direct}
+  - {id: news_event, label: News event, kind: event, geo_resolution: direct}
+  - {id: weather_obs, label: Weather observation, kind: event, geo_resolution: direct}
+  - {id: wifi_ap, label: Wi-Fi access point, kind: object, geo_resolution: direct, description: BSSID with observed location}
+  - {id: cell_tower, label: Cell tower, kind: object, geo_resolution: direct, description: MCC-MNC-LAC-CID with location}
+  - {id: tor_relay, label: Tor relay, kind: object, geo_resolution: direct}
+  - {id: social_profile, label: Social profile, kind: object, geo_resolution: via_profile}
+  - {id: code_repo, label: Code repository, kind: object, geo_resolution: none}
+  - {id: mobile_app, label: Mobile app, kind: object, geo_resolution: none}
+  - {id: browser_extension, label: Browser extension, kind: object, geo_resolution: none}
+  - {id: cloud_bucket, label: Cloud storage bucket, kind: object, geo_resolution: none}
+  - {id: paste, label: Paste, kind: object, geo_resolution: none}
+  - {id: breach_record, label: Breach record, kind: object, geo_resolution: none}
+  - {id: darkweb_mention, label: Dark-web mention, kind: object, geo_resolution: none}
+  - {id: similar_domain, label: Similar domain, kind: object, geo_resolution: via_ip, description: typo / bit-squat / homoglyph candidate}

@@ -1,0 +1,65 @@
+{{- $root := . -}}
+{{- range $name, $spec := dict "api" .Values.api "worker" .Values.worker "feeds" .Values.feeds }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "osint.name" $root }}-{{ $name }}
+  labels: {{- include "osint.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  replicas: {{ $spec.replicas }}
+  {{- if eq $name "feeds" }}
+  strategy: { type: Recreate }
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "osint.name" $root }}
+      app.kubernetes.io/component: {{ $name }}
+  template:
+    metadata:
+      labels: {{- include "osint.labels" $root | nindent 8 }}
+        app.kubernetes.io/component: {{ $name }}
+    spec:
+      {{- if eq $name "api" }}
+      initContainers:
+        - name: migrate
+          image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
+          command: ["alembic", "upgrade", "head"]
+          {{- include "osint.env" $root | nindent 10 }}
+      {{- end }}
+      containers:
+        - name: {{ $name }}
+          image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          command: ["osint-board", {{ $name | quote }}]
+          {{- include "osint.env" $root | nindent 10 }}
+          {{- if eq $name "api" }}
+          ports: [{ containerPort: 8000, name: http }]
+          readinessProbe: { httpGet: { path: /api/health, port: http }, periodSeconds: 10 }
+          livenessProbe: { httpGet: { path: /api/health, port: http }, periodSeconds: 30 }
+          {{- end }}
+          resources: {{- toYaml $spec.resources | nindent 12 }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "osint.name" . }}-web
+  labels: {{- include "osint.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  replicas: {{ .Values.web.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "osint.name" . }}
+      app.kubernetes.io/component: web
+  template:
+    metadata:
+      labels: {{- include "osint.labels" . | nindent 8 }}
+        app.kubernetes.io/component: web
+    spec:
+      containers:
+        - name: web
+          image: "{{ .Values.image.repository }}-web:{{ .Values.image.tag }}"
+          ports: [{ containerPort: 80, name: http }]

@@ -1,0 +1,247 @@
+# Globe layers. Every module `layer` value in modules.yaml must exist here.
+# The frontend layer registry (frontend/src/layers/registry.ts) and the backend
+# layer API (/api/layers) are both generated/validated from this file.
+#
+# group:    live (streams) | events (timestamped occurrences) | static (slow-changing reference data)
+#           | investigation (entities from the analyst's active investigations)
+# render:   points | tracks | orbits | heat | halos   (halos = low-precision fuzzy discs, never pins)
+# update:   stream (WebSocket deltas) | poll:<interval> | static | on_demand
+# color:    base colour (hex). color_by: attribute-driven colour scale within the layer.
+# altitude: clamp (on the ellipsoid surface) | absolute (true height above WGS84 ellipsoid)
+version: 1
+layers:
+  - id: maritime
+    name: Maritime (AIS)
+    group: live
+    color: "#22d3ee"
+    color_by: {attribute: ship_type, scale: categorical}
+    entity_types: [vessel, position]
+    render: tracks
+    update: stream
+    altitude: clamp
+    default_visible: true
+    sources: [aisstream]
+    description: Live vessel positions and recent tracks from terrestrial AIS.
+
+  - id: aviation
+    name: Aviation (ADS-B)
+    group: live
+    color: "#60a5fa"
+    color_by: {attribute: altitude_m, scale: sequential}
+    entity_types: [aircraft, position]
+    render: tracks
+    update: stream
+    altitude: absolute
+    default_visible: true
+    sources: [opensky]
+    description: Live aircraft positions at true geometric altitude (barometric fallback).
+
+  - id: space
+    name: Space (satellites)
+    group: live
+    color: "#e5e7eb"
+    color_by: {attribute: object_class, scale: categorical}
+    entity_types: [satellite]
+    render: orbits
+    update: poll:daily
+    altitude: absolute
+    default_visible: false
+    sources: [celestrak]
+    description: SGP4-propagated positions and orbit trails from TLE/GP element sets, at true altitude.
+
+  - id: fires
+    name: Fires & thermal anomalies
+    group: events
+    color: "#f97316"
+    color_by: {attribute: frp, scale: sequential}
+    entity_types: [fire_event]
+    render: points
+    update: poll:3h
+    altitude: clamp
+    default_visible: true
+    sources: [nasa_firms]
+    description: NASA FIRMS VIIRS/MODIS hotspots (last 24h by default).
+
+  - id: seismic
+    name: Earthquakes
+    group: events
+    color: "#facc15"
+    color_by: {attribute: magnitude, scale: sequential}
+    entity_types: [seismic_event]
+    render: points
+    update: poll:1m
+    altitude: clamp
+    default_visible: true
+    sources: [usgs]
+    description: USGS events; marker size scales with magnitude, depth shown in the inspector.
+
+  - id: conflict
+    name: Armed conflict
+    group: events
+    color: "#dc2626"
+    color_by: {attribute: event_type, scale: categorical}
+    entity_types: [conflict_event]
+    render: points
+    update: poll:hourly
+    altitude: clamp
+    default_visible: false
+    sources: [acled]
+    description: Conflict events (ACLED while licensed; internal conflict_events service otherwise).
+
+  - id: news
+    name: Global news events
+    group: events
+    color: "#a78bfa"
+    color_by: {attribute: goldstein, scale: diverging}
+    entity_types: [news_event]
+    render: heat
+    update: poll:15m
+    altitude: clamp
+    default_visible: false
+    sources: [gdelt]
+    description: GDELT 2.0 events geocoded to ActionGeo; heat by volume, colour by tone.
+
+  - id: weather
+    name: Weather
+    group: events
+    color: "#38bdf8"
+    color_by: {attribute: wind_speed, scale: sequential}
+    entity_types: [weather_obs]
+    render: points
+    update: poll:hourly
+    altitude: clamp
+    default_visible: false
+    sources: [windy_saildrone]
+    description: Surface observations and point forecasts.
+
+  - id: cell_towers
+    name: Cell towers
+    group: static
+    color: "#a3e635"
+    color_by: {attribute: radio, scale: categorical}
+    entity_types: [cell_tower]
+    render: points
+    update: static
+    altitude: clamp
+    default_visible: false
+    tiled: true
+    sources: [opencellid]
+    description: OpenCellID towers served as vector tiles (visible from zoom 10).
+
+  - id: wifi
+    name: Wi-Fi access points
+    group: static
+    color: "#4ade80"
+    color_by: {attribute: encryption, scale: categorical}
+    entity_types: [wifi_ap]
+    render: points
+    update: on_demand
+    altitude: clamp
+    default_visible: false
+    tiled: true
+    sources: [wigle]
+    description: WiGLE observations for areas of interest.
+
+  - id: tor
+    name: Tor relays
+    group: static
+    color: "#c084fc"
+    color_by: {attribute: relay_role, scale: categorical}
+    entity_types: [tor_relay]
+    render: points
+    update: poll:hourly
+    altitude: clamp
+    default_visible: false
+    sources: [tor_exit_nodes]
+    description: Relays and exits from Onionoo with their geolocation.
+
+  - id: cloud_regions
+    name: Cloud regions
+    group: static
+    color: "#94a3b8"
+    color_by: {attribute: provider, scale: categorical}
+    entity_types: [cloud_region]
+    render: halos
+    update: static
+    altitude: clamp
+    default_visible: false
+    sources: [hosting_provider]
+    description: Hosting-provider regions; investigation IPs inside published ranges snap here.
+
+  - id: infrastructure
+    name: Infrastructure
+    group: investigation
+    color: "#fbbf24"
+    color_by: {attribute: precision, scale: categorical}
+    entity_types: [ip, netblock, asn, hostname, domain, open_port, geo_point]
+    render: points
+    update: on_demand
+    altitude: clamp
+    default_visible: true
+    sources: []
+    description: Geolocated hosts, netblocks and ASN organisations from the active investigation.
+
+  - id: threat
+    name: Threat intelligence
+    group: investigation
+    color: "#ef4444"
+    color_by: {attribute: severity, scale: sequential}
+    entity_types: [verdict, vulnerability]
+    render: points
+    update: on_demand
+    altitude: clamp
+    default_visible: true
+    sources: []
+    description: Indicators with a malicious verdict, placed via their resolved IP.
+
+  - id: social
+    name: People & profiles
+    group: investigation
+    color: "#f472b6"
+    color_by: {attribute: platform, scale: categorical}
+    entity_types: [social_profile, person, phone, phone_info]
+    render: halos
+    update: on_demand
+    altitude: clamp
+    default_visible: true
+    sources: []
+    description: Profile locations (geocoded free text) and phone regions; always low precision.
+
+  - id: corporate
+    name: Corporate
+    group: investigation
+    color: "#818cf8"
+    color_by: {attribute: registry, scale: categorical}
+    entity_types: [company, lei, whois_record, physical_address]
+    render: points
+    update: on_demand
+    altitude: clamp
+    default_visible: true
+    sources: []
+    description: Registered and WHOIS addresses of organisations.
+
+  - id: media
+    name: Geotagged media
+    group: investigation
+    color: "#fde047"
+    color_by: {attribute: source, scale: categorical}
+    entity_types: [raw_file, url]
+    render: points
+    update: on_demand
+    altitude: clamp
+    default_visible: true
+    sources: [file_metadata, flickr]
+    description: EXIF GPS and photo-service geotags (exact precision).
+
+  - id: investigation
+    name: Investigation (other)
+    group: investigation
+    color: "#f8fafc"
+    color_by: {attribute: entity_type, scale: categorical}
+    entity_types: [country, geo_point]
+    render: halos
+    update: on_demand
+    altitude: clamp
+    default_visible: true
+    sources: []
+    description: Anything else in the investigation that resolved to a place.

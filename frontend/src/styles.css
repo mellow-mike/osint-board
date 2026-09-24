@@ -1,0 +1,36 @@
+/* HeroUI v3 pulls in Tailwind v4 itself (see node_modules/@heroui/styles/dist/index.css). */
+@import '@heroui/styles';
+@import 'cesium/Build/Cesium/Widgets/widgets.css';
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #05070a;
+  color: #e5e7eb;
+  overflow: hidden;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Cesium's credit line must stay visible (imagery licences); keep it small and out of the way. */
+.cesium-viewer-bottom {
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+.cesium-viewer-animationContainer,
+.cesium-viewer-timelineContainer {
+  left: 16rem !important;
+  right: 20rem !important;
+}
+
+.panel {
+  backdrop-filter: blur(8px);
+  background: rgba(10, 14, 20, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.75rem;
+}

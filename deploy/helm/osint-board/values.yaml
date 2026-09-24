@@ -1,0 +1,41 @@
+# Cloud deployment values. Managed services are the default assumption:
+#   - PostgreSQL 16 with PostGIS (TimescaleDB optional; migrations degrade gracefully)
+#   - Redis (Elasticache / Memorystore / Upstash)
+#   - Meilisearch (Meilisearch Cloud or the bundled StatefulSet below)
+image:
+  repository: ghcr.io/mellow-mike/osint-board
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+api:
+  replicas: 2
+  resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { cpu: "1", memory: 1Gi } }
+worker:
+  replicas: 2
+  resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { cpu: "2", memory: 2Gi } }
+feeds:
+  replicas: 1   # exactly one — feeds are singleton pollers/streams
+  resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { cpu: "1", memory: 1Gi } }
+web:
+  replicas: 2
+tools:
+  enabled: false  # nmap/nuclei runner; needs NET_RAW and an explicit legal review
+
+ingress:
+  enabled: true
+  className: nginx
+  host: osint.example.com
+  tls: true
+
+# Secrets are referenced, never inlined. Create `osint-board-secrets` with keys:
+#   OSINT_DATABASE_URL, OSINT_REDIS_URL, OSINT_MEILI_URL, OSINT_MEILI_KEY, and any OSINT_MODULE_*_API_KEY.
+existingSecret: osint-board-secrets
+
+config:
+  OSINT_ENV: prod
+  OSINT_LOG_JSON: "true"
+  OSINT_PASSIVE_ONLY: "true"
+
+meilisearch:
+  bundled: false   # true deploys a single-replica StatefulSet with a PVC
+  storage: 20Gi
