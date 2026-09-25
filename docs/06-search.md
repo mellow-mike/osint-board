@@ -54,7 +54,7 @@ Ambiguous tokens keep all candidates; anything below confidence 0.6 is a *sugges
 ```
 parse -> [exact(type, normalized) for each confident detection]   Postgres/Meili exact
       -> fuzzy(text or primary value, filters)                    Meilisearch
-      -> live(type, key)                                          Redis latest positions (MMSI/ICAO24/NORAD)
+      -> live(type, key)                                          (planned) latest positions (MMSI/ICAO24/NORAD)
 merge: exact hits first (score 1.0), then Meili ranking x 0.95, de-duplicated by id
 ```
 

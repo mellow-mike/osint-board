@@ -1,0 +1,11 @@
+{"type":"FeatureCollection","metadata":{"generated":1790301200000,"title":"USGS All Earthquakes, Past Hour","count":4},
+ "features":[
+  {"type":"Feature","properties":{"mag":4.1,"place":"30 km S of Alice, Texas","time":1790300000000,"updated":1790301000000,"url":"https://earthquake.usgs.gov/earthquakes/eventpage/tx2026svwvaw","tsunami":0,"magType":"ml","status":"reviewed","ids":",us6000txgl,tx2026svwvaw,","title":"M 4.1 - 30 km S of Alice, Texas"},
+   "geometry":{"type":"Point","coordinates":[-98.1,27.5,5.0]},"id":"tx2026svwvaw"},
+  {"type":"Feature","properties":{"mag":2.0,"place":"broken coordinates","time":1790300100000,"ids":",ci00000001,","title":"M 2.0 - broken"},
+   "geometry":{"type":"Point","coordinates":[null,33.4,11.0]},"id":"ci00000001"},
+  {"type":"Feature","properties":{"mag":1.0,"place":"latitude out of range","time":1790300200000,"title":"M 1.0 - out of range"},
+   "geometry":{"type":"Point","coordinates":[-116.3,95.0,3.0]},"id":"ci00000002"},
+  {"type":"Feature","properties":{"mag":0.8,"place":"18 km N of Borrego Springs, CA","time":1790300804730,"ids":",ci41338783,","title":"M 0.8 - 18 km N of Borrego Springs, CA"},
+   "geometry":{"type":"Point","coordinates":[-116.370833333333,33.4171666666667,11.06]},"id":"ci41338783"}
+ ]}

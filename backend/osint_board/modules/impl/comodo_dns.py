@@ -1,6 +1,6 @@
 """Comodo Secure DNS — malware / phishing filtering resolvers (no key; reclassified as free in the catalog).
 
-Catalog: comodo_dns · tiered_api (replacement: local_reimpl) · lookup · access=open · phase 3
+Catalog: comodo_dns · tiered_api (replacement: local_reimpl) · lookup · access=open · phase 1
 """
 
 from __future__ import annotations

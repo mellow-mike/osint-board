@@ -6,9 +6,10 @@ compares it with what is actually implemented.
 
 from __future__ import annotations
 
+import re
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from osint_board.entities.types import EntityType
 
@@ -24,6 +25,17 @@ Altitude = Literal["clamp", "absolute"]
 EntityKind = Literal["identifier", "record", "content", "verdict", "asset", "geo", "track", "event", "object"]
 GeoResolution = Literal["direct", "via_ip", "via_address", "via_registry", "via_region", "via_profile", "none"]
 Effort = Literal["S", "M", "L", "XL"]
+
+_DURATION = re.compile(r"^(\d+)\s*(s|m|h|d|w)$")
+_DURATION_S = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
+
+
+def duration_seconds(value: str) -> int:
+    """``90s`` / ``20m`` / ``6h`` / ``2d`` / ``1w`` → seconds; anything else (or zero) raises ``ValueError``."""
+    m = _DURATION.match(value.strip())
+    if not m or int(m.group(1)) <= 0:
+        raise ValueError(f"invalid duration {value!r} (expected a positive number with s/m/h/d/w, e.g. 20m or 6h)")
+    return int(m.group(1)) * _DURATION_S[m.group(2)]
 
 
 class ModuleSpec(BaseModel):
@@ -75,6 +87,22 @@ class LayerSpec(BaseModel):
     tiled: bool = False
     sources: list[str] = []
     description: str = ""
+    #: Features older than this are stale: the API never serves them and the globe expires them (live tracks,
+    #: static rows by ``updated_at``). A duration like ``20m`` or ``6h``; ``None`` keeps everything.
+    max_age: str | None = None
+    #: Credit line the globe shows while the layer is visible (licence terms of the upstream data).
+    attribution: str | None = None
+
+    @field_validator("max_age")
+    @classmethod
+    def _check_max_age(cls, value: str | None) -> str | None:
+        if value is not None:
+            duration_seconds(value)
+        return value
+
+    @property
+    def max_age_seconds(self) -> int | None:
+        return duration_seconds(self.max_age) if self.max_age else None
 
 
 class ServiceSpec(BaseModel):

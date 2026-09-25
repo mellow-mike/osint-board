@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -178,3 +178,98 @@ async def test_investigation_graph(app, client):
     small = (await client.get(f"/api/investigations/{inv}/graph", params={"limit": 2})).json()
     assert small["truncated"] is True and len(small["nodes"]) == 2
     assert [e["rel_type"] for e in small["edges"]] == ["crawled"]  # only edges between returned nodes
+
+
+def _track(key: str, **props) -> SimpleNamespace:  # noqa: ANN003
+    return SimpleNamespace(
+        key=key, name="RYR1", kind=props.get("kind"), lon=8.0, lat=50.0, alt_m=10_000.0, props=props,
+        time=datetime(2026, 9, 24, 12, tzinfo=UTC), heading=90.0, speed=450.0,
+    )  # fmt: skip
+
+
+async def test_live_layers_clamp_since_to_max_age(app, client):
+    from osint_board.api.deps import get_session
+
+    session = FakeSession(
+        {
+            "FROM tracks": [
+                _track("aviation:4ca334", entity_type="aircraft", kind="large", altitude_m=10_000.0),
+                _track("aviation:3c1234", kind="heavy"),  # stored before the sink wrote entity_type
+            ]
+        }
+    )
+
+    async def fake_session():
+        yield session
+
+    app.dependency_overrides[get_session] = fake_session
+    before = datetime.now(tz=UTC)
+    body = (await client.get("/api/layers/aviation/features", params={"since": "7d"})).json()
+    sql, params = session.statements[-1]
+    assert "kind AS entity_type" not in sql
+    max_age = app.state.osint.catalog.layer("aviation").max_age_seconds
+    assert max_age == 1200
+    assert params["since"] >= before - timedelta(seconds=max_age)  # a week was asked for; 20 minutes is served
+    first, second = (f["properties"] for f in body["features"])
+    assert first["entity_type"] == "aircraft" and first["kind"] == "large"
+    assert second["entity_type"] == "aircraft" and second["kind"] == "heavy"  # kind never leaks into entity_type
+
+    # a narrower window than max_age is kept as asked
+    await client.get("/api/layers/aviation/features", params={"since": "5m"})
+    assert session.statements[-1][1]["since"] >= before - timedelta(minutes=5, seconds=5)
+    # events layers without max_age keep the requested window
+    await client.get("/api/layers/seismic/features", params={"since": "7d"})
+    assert session.statements[-1][1]["since"] <= before - timedelta(days=6)
+    # GDELT stamps events with the end of their 15-minute window, ahead of now: they must not be hidden
+    await client.get("/api/layers/news/features", params={"since": "1h"})
+    assert session.statements[-1][1]["until"] >= before + timedelta(minutes=15)
+
+
+async def test_static_layers_filter_on_max_age(app, client):
+    from osint_board.api.deps import get_session
+
+    session = FakeSession()
+
+    async def fake_session():
+        yield session
+
+    app.dependency_overrides[get_session] = fake_session
+    before = datetime.now(tz=UTC)
+    await client.get("/api/layers/tor/features")
+    sql, params = session.statements[-1]
+    assert "updated_at >= :since" in sql
+    assert before - timedelta(hours=6, seconds=5) <= params["since"] <= before - timedelta(hours=5, minutes=59)
+    await client.get("/api/layers/cell_towers/features", params={"bbox": "13.3,52.4,13.5,52.6", "since": "1h"})
+    assert session.statements[-1][1]["since"].year == 1970  # no max_age: reference data is served whatever its age
+
+
+async def test_unparseable_since_is_rejected(client):
+    r = await client.get("/api/layers/seismic/features", params={"since": "garbage"})
+    assert r.status_code == 400 and "since" in r.json()["detail"]
+    # a duration past what datetime can represent is a bad request too, not a server error
+    assert (await client.get("/api/layers/aviation/features", params={"since": "99999999999d"})).status_code == 400
+    assert (
+        await client.get("/api/layers/seismic/features", params={"since": "2026-09-24T10:00:00Z"})
+    ).status_code == 200
+
+
+async def test_large_responses_are_gzipped(app, client):
+    from osint_board.api.deps import get_session
+
+    rows = [
+        SimpleNamespace(
+            key=f"relay{i:04d}", name=f"relay{i}", lon=13.4, lat=52.5, props={"name": f"relay{i}", "precision": "city"},
+            time=datetime(2026, 9, 24, tzinfo=UTC),
+        )
+        for i in range(200)
+    ]  # fmt: skip
+    session = FakeSession({"FROM static_features": rows})
+
+    async def fake_session():
+        yield session
+
+    app.dependency_overrides[get_session] = fake_session
+    r = await client.get("/api/layers/tor/features", headers={"accept-encoding": "gzip"})
+    assert r.status_code == 200 and r.headers["content-encoding"] == "gzip" and r.json()["count"] == 200
+    small = await client.get("/api/health", headers={"accept-encoding": "gzip"})
+    assert "content-encoding" not in small.headers

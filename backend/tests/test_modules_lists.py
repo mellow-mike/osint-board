@@ -181,6 +181,17 @@ def test_onionoo_parse(fixtures_dir):
     assert emits[1].meta["relay_role"] == "middle" and exit_relay.observed_at.year == 2026
 
 
+def test_onionoo_without_coordinates_falls_back_to_the_country_centroid(fixtures_dir):
+    """Onionoo dropped latitude/longitude/city_name; relays are placed at their country (a halo, never a pin)."""
+    emits = parse_onionoo(json.loads((fixtures_dir / "lists/onionoo_country_only.json").read_text()))
+    placed = {e.meta["nickname"]: e.geo for e in emits}
+    assert placed["BaumiMiddleRelays"].precision == "country" and placed["BaumiMiddleRelays"].source.startswith(
+        "onionoo"
+    )
+    assert (placed["luexit"].lat, placed["luexit"].lon) == (49.8, 6.1)
+    assert placed["nowhere"] is None  # no country, no position: the sink skips it
+
+
 async def test_tor_exit_lookup_and_poll(fake_http, run_lookup, run_poll):
     fake_http.route("torbulkexitlist", file="lists/tor_exit_list.txt").route(
         "onionoo.torproject.org", file="lists/onionoo_details.json"

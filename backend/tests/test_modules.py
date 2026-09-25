@@ -6,10 +6,18 @@ import pytest
 
 from osint_board.entities.types import EntityType
 from osint_board.feeds.runner import MemorySink, cadence_seconds
-from osint_board.modules.base import AuthorizationError, ExtractModule, FeedModule, LookupModule, ModuleContext, Scope
-from osint_board.modules.impl.celestrak import parse_tle
+from osint_board.modules.base import (
+    AuthorizationError,
+    ExtractModule,
+    FeedModule,
+    LookupModule,
+    MissingSecret,
+    ModuleContext,
+    Scope,
+)
+from osint_board.modules.impl.celestrak import catalog_number, parse_tle
 from osint_board.modules.impl.crt_sh import parse_rows
-from osint_board.modules.impl.nasa_firms import parse_csv
+from osint_board.modules.impl.nasa_firms import parse_csv, response_error
 from osint_board.modules.impl.usgs import parse_feed
 from osint_board.modules.registry import ModuleStatus
 from osint_board.modules.types import Content, EntityRef
@@ -59,6 +67,85 @@ def test_firms_parse(fixtures_dir):
     emits = parse_csv((fixtures_dir / "firms_sample.csv").read_text(), "VIIRS_SNPP_NRT")
     assert len(emits) == 2 and emits[1].meta["frp"] == 12.9 and emits[1].geo.lat == 37.7749
     assert emits[0].observed_at.hour == 3 and emits[0].observed_at.minute == 42
+
+
+def test_usgs_skips_bad_features_and_lists_superseded_ids(fixtures_dir):
+    rejects: list[str] = []
+    emits = parse_feed(json.loads((fixtures_dir / "feeds/usgs_revised.json").read_text()), rejects=rejects)
+    assert [e.key for e in emits] == ["usgs:tx2026svwvaw", "usgs:ci41338783"]
+    assert emits[0].meta["supersedes"] == ["usgs:us6000txgl"]  # the sink deletes the row stored under the old id
+    assert emits[1].meta["supersedes"] == []
+    assert len(rejects) == 2 and rejects[0].startswith("ci00000001: TypeError") and "ci00000002" in rejects[1]
+    assert parse_feed(json.loads((fixtures_dir / "usgs_sample.json").read_text()))[0].meta["supersedes"] == []
+
+
+async def test_usgs_poll_survives_a_bad_feature(fake_http, run_poll):
+    fake_http.route("all_hour.geojson", file="feeds/usgs_revised.json")
+    assert [e.key for e in await run_poll("usgs")] == ["usgs:tx2026svwvaw", "usgs:ci41338783"]
+
+
+def test_celestrak_alpha5_and_malformed_sets(fixtures_dir):
+    assert catalog_number("25544") == 25544 and catalog_number("    5") == 5
+    assert catalog_number("A0000") == 100_000 and catalog_number("J0001") == 180_001  # I is skipped
+    assert catalog_number("Z9999") == 339_999
+    for bad in ("I0001", "O1234", "A12", "-1234", "12a45", "     "):
+        with pytest.raises(ValueError):
+            catalog_number(bad)
+    rejects: list[str] = []
+    emits = parse_tle((fixtures_dir / "feeds/celestrak_alpha5.tle").read_text(), "active", rejects=rejects)
+    assert [e.meta["norad_id"] for e in emits] == [100_001, 272_345, 25544]
+    assert emits[0].key == "space:100001" and emits[0].value == "OBJECT A5"
+    assert emits[-1].value == "ISS (ZARYA)"  # the truncated set did not shift the rest of the file
+    assert [r.split(":")[0] for r in rejects] == [
+        "TRUNCATED SET",
+        "BAD CATALOG NUMBER",
+        "MISMATCHED LINES",
+        "BAD MEAN MOTION",
+    ]
+
+
+async def test_celestrak_downloads_a_group_once_per_window_and_backs_off_on_403(registry, fake_http, fixtures_dir):
+    from osint_board.modules.base import RetryLater
+
+    fake_http.route("celestrak.org", file="celestrak_sample.tle")
+    mod = registry.instantiate("celestrak", config={"groups": ["stations"]})
+    first = [e async for e in mod.poll()]
+    again = [e async for e in mod.poll()]  # e.g. retried after a sink failure: reuse, never re-download
+    assert first and len(again) == len(first) and len(fake_http.calls) == 1
+
+    fake_http.routes.clear()
+    fake_http.route("celestrak.org", "Forbidden", status=403)
+    blocked = registry.instantiate("celestrak", config={"groups": ["stations"]})
+    with pytest.raises(RetryLater) as info:
+        [e async for e in blocked.poll()]
+    assert info.value.retry_after == 2 * 3600 and "403" in str(info.value)
+
+
+def test_firms_bad_rows(fixtures_dir):
+    rejects: list[str] = []
+    emits = parse_csv((fixtures_dir / "feeds/firms_bad_rows.csv").read_text(), "VIIRS_SNPP_NRT", rejects=rejects)
+    assert [round(e.geo.lat, 4) for e in emits] == [-15.7801, 37.7749]
+    assert emits[0].meta["frp"] is None and emits[1].meta["frp"] is None  # NaN / inf never reach jsonb
+    assert emits[1].observed_at.hour == 10
+    assert len(rejects) == 3 and all(r.startswith("line ") for r in rejects)
+
+
+async def test_firms_error_bodies_raise_clearly(fake_http, run_poll, monkeypatch):
+    assert response_error("latitude,longitude\n") is None and response_error("") is None
+    assert response_error("Invalid MAP_KEY.") == "Invalid MAP_KEY."
+    monkeypatch.setenv("OSINT_MODULE_NASA_FIRMS_API_KEY", "firms-key-123")
+    fake_http.route("VIIRS_SNPP_NRT", "Invalid MAP_KEY.")
+    with pytest.raises(
+        MissingSecret, match=r"rejected the MAP_KEY in OSINT_MODULE_NASA_FIRMS_API_KEY: Invalid MAP_KEY\."
+    ):
+        await run_poll("nasa_firms", config={"sources": ["VIIRS_SNPP_NRT"]})  # a bad key disables the feed
+    fake_http.routes.clear()
+    fake_http.route("VIIRS_SNPP_NRT", "Exceeding allowed transaction limit", status=429)
+    with pytest.raises(RuntimeError, match="HTTP 429: Exceeding allowed transaction limit"):
+        await run_poll("nasa_firms", config={"sources": ["VIIRS_SNPP_NRT"]})
+    fake_http.routes.clear()
+    fake_http.route("VIIRS_SNPP_NRT", file="feeds/firms_bad_rows.csv")
+    assert len(await run_poll("nasa_firms", config={"sources": ["VIIRS_SNPP_NRT"]})) == 2
 
 
 def test_crtsh_parse(fixtures_dir):

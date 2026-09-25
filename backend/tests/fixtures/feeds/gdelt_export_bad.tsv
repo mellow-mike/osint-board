@@ -1,0 +1,6 @@
+2000000001	20260924					GERMANY										POLICE										0142	014	01	1	3.0	12	2	6	-1.5																	4	Berlin, Berlin, Germany	GM			52.5167	13.4	-1	20260924120000	https://news.example/berlin
+2000000002	20260924					GERMANY										POLICE										0142	014	01	1	not-a-number	12	2	6	-1.5																	4	Berlin, Berlin, Germany	GM			52.5167	13.4	-1	20260924120000	https://news.example/berlin
+2000000003	20260924					GERMANY										POLICE										0142	014	01	1	3.0	12	2	6	-1.5																	4	Berlin, Berlin, Germany	GM			nan	13.4	-1	20260924120000	https://news.example/berlin
+2000000004	20260924					GERMANY										POLICE										0142	014	01	1	3.0	12	2	1.5	-1.5																	4	Berlin, Berlin, Germany	GM			52.5167	13.4	-1	20260924120000	https://news.example/berlin
+2000000005	20260924					"QUOTED ACTOR										POLICE										0142	014	01	1	3.0	12	2	6	nan																	4	Berlin, Berlin, Germany	GM			52.5167	13.4	-1	20260924120000	https://news.example/berlin
+2000000006	20260924					GERMANY										POLICE										0142	014	01	1	3.0	12	2	6	-1.5																	4	Berlin, Berlin, Germany	GM			52.5167	13.4	-1	20260924120000	https://news.example/berlin

@@ -1,6 +1,6 @@
 """Credit card number extractor (Luhn validated; values are emitted masked, never raw).
 
-Catalog: credit_card_extractor · internal · extract · access=local · phase 1
+Catalog: credit_card_extractor · internal · extract · access=local · phase 2 (pulled forward into phase 1)
 """
 
 from __future__ import annotations

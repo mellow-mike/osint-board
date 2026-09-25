@@ -10,6 +10,7 @@ export function StatusBar() {
   const clock = useStore((s) => s.clockIso);
   const counts = useStore((s) => s.counts);
   const visible = useStore((s) => s.visible);
+  const stream = useStore((s) => s.stream);
   const { data: health } = useQuery({ queryKey: ['health'], queryFn: api.health, refetchInterval: 30_000 });
   const total = Object.entries(counts).reduce((acc, [id, n]) => acc + (visible[id] ? n : 0), 0);
 
@@ -19,6 +20,16 @@ export function StatusBar() {
       <span className="opacity-80">{mpp ? `1 px ≈ ${formatDistance(mpp)}` : ''}</span>
       <span className="opacity-80">{clock ? clock.replace('T', ' ').replace(/\.\d+Z$/, 'Z') : ''}</span>
       <span className="opacity-80">{total.toLocaleString()} features</span>
+      {stream && (
+        <Chip
+          size="sm"
+          variant="soft"
+          color={stream.state === 'live' ? 'success' : stream.state === 'down' ? 'warning' : 'default'}
+          title={stream.state === 'down' ? stream.message : undefined}
+        >
+          <Chip.Label>{stream.state === 'live' ? 'live' : stream.state === 'down' ? `live off: ${stream.message}` : 'live …'}</Chip.Label>
+        </Chip>
+      )}
       <Chip size="sm" variant="soft" color={health ? (health.services['database'] === 'ok' ? 'success' : 'warning') : 'default'}>
         <Chip.Label>{health ? `api ${health.version} · db ${health.services['database'] ?? '?'} · ${health.services['search']}` : 'api …'}</Chip.Label>
       </Chip>

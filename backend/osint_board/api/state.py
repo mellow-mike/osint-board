@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -15,6 +17,43 @@ from osint_board.search.service import SearchService
 
 log = get_logger(__name__)
 
+#: A command on a dead or half-open Redis connection fails after this long instead of hanging its caller.
+REDIS_SOCKET_TIMEOUT_S = 10.0
+REDIS_CONNECT_TIMEOUT_S = 5.0
+#: Idle pooled connections are PINGed before reuse once this many seconds have passed.
+REDIS_HEALTH_CHECK_S = 30
+#: When Redis is unreachable, reconnecting is attempted at most this often.
+REDIS_RETRY_S = 60.0
+
+
+def redis_client(url: str) -> Any:
+    """A Redis client with socket timeouts and health checks (no I/O until the first command).
+
+    Pub/sub readers must poll with ``get_message(timeout=...)``: a blocking ``listen()`` would hit the socket
+    timeout on a quiet channel.
+    """
+    import redis.asyncio as aioredis
+
+    return aioredis.from_url(
+        url,
+        decode_responses=True,
+        socket_timeout=REDIS_SOCKET_TIMEOUT_S,
+        socket_connect_timeout=REDIS_CONNECT_TIMEOUT_S,
+        health_check_interval=REDIS_HEALTH_CHECK_S,
+    )
+
+
+async def connect_redis(url: str) -> Any:
+    """A client that answered PING; raises (after closing the client) when Redis is unreachable."""
+    client = redis_client(url)
+    try:
+        await client.ping()
+    except BaseException:
+        with contextlib.suppress(Exception):
+            await client.aclose()
+        raise
+    return client
+
 
 @dataclass
 class AppState:
@@ -26,6 +65,25 @@ class AppState:
     geo: GeoResolver
     redis: Any | None = None
     services: dict[str, str] = field(default_factory=dict)
+    #: ``time.monotonic()`` before which :meth:`ensure_redis` does not try to reconnect.
+    redis_retry_at: float = 0.0
+
+    async def ensure_redis(self) -> Any | None:
+        """The shared Redis client; when startup could not reach Redis, reconnect at most once per minute."""
+        if self.redis is not None or self.settings.env == "test":
+            return self.redis
+        now = time.monotonic()
+        if now < self.redis_retry_at:
+            return None
+        self.redis_retry_at = now + REDIS_RETRY_S
+        try:
+            self.redis = await connect_redis(self.settings.redis_url)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("redis.unavailable", error=str(exc), retry_in=REDIS_RETRY_S)
+            return None
+        self.services["redis"] = "ok"
+        log.info("redis.connected")
+        return self.redis
 
 
 async def build_state(settings: Settings | None = None, *, use_memory_index: bool = False) -> AppState:
@@ -49,16 +107,15 @@ async def build_state(settings: Settings | None = None, *, use_memory_index: boo
             services["search"] = "memory (meilisearch unavailable)"
 
     redis = None
+    redis_retry_at = 0.0
     if settings.env != "test":
         try:
-            import redis.asyncio as aioredis
-
-            redis = aioredis.from_url(settings.redis_url, decode_responses=True)
-            await redis.ping()
+            redis = await connect_redis(settings.redis_url)
             services["redis"] = "ok"
         except Exception as exc:  # noqa: BLE001
-            log.warning("redis.unavailable", error=str(exc))
+            log.warning("redis.unavailable", error=str(exc), retry_in=REDIS_RETRY_S)
             redis = None
+            redis_retry_at = time.monotonic() + REDIS_RETRY_S
             services["redis"] = "unavailable"
 
     geoip = None
@@ -81,4 +138,5 @@ async def build_state(settings: Settings | None = None, *, use_memory_index: boo
         geo=geo,
         redis=redis,
         services=services,
+        redis_retry_at=redis_retry_at,
     )

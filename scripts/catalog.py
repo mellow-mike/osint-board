@@ -13,6 +13,7 @@ Uses the backend package for the pydantic models, so run it from the backend ven
 from __future__ import annotations
 
 import csv
+import json
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -51,6 +52,14 @@ def validate(cat: Catalog) -> list[str]:
     return errors
 
 
+def _ts_literal(value: object) -> str:
+    """A TypeScript literal for a JSON-able value: JSON is valid TS for strings (any quote or backslash), numbers,
+    booleans, null, arrays and objects; objects are written inline with bare keys like the rest of the file."""
+    if isinstance(value, dict):
+        return "{ " + ", ".join(f"{k}: {_ts_literal(v)}" for k, v in value.items()) + " }"
+    return json.dumps(value, ensure_ascii=False)
+
+
 def _md_table(rows: list[list[str]], header: list[str]) -> str:
     lines = ["| " + " | ".join(header) + " |", "|" + "|".join("---" for _ in header) + "|"]
     lines += ["| " + " | ".join(c.replace("|", "\\|") for c in r) + " |" for r in rows]
@@ -75,8 +84,12 @@ def docs(cat: Catalog) -> None:
     out.append(f"Implemented today: **{len(implemented)}** ({', '.join(sorted(implemented))}).")
     out += ["", "## Globe layers", ""]
     out.append(_md_table(
-        [[lyr.id, lyr.name, lyr.group, lyr.render, lyr.update, lyr.color, ", ".join(lyr.sources) or "investigation entities"] for lyr in cat.layers],
-        ["id", "name", "group", "render", "update", "colour", "sources"],
+        [
+            [lyr.id, lyr.name, lyr.group, lyr.render, lyr.update, lyr.color, ", ".join(lyr.sources) or "investigation entities",
+             lyr.max_age or "—", lyr.attribution or "—"]
+            for lyr in cat.layers
+        ],
+        ["id", "name", "group", "render", "update", "colour", "sources", "max age", "attribution"],
     ))
     out += ["", "## Internal replacement services", ""]
     for s in cat.services:
@@ -121,21 +134,25 @@ def docs(cat: Catalog) -> None:
         "export const LAYERS: readonly LayerSpec[] = [",
     ]
     for lyr in cat.layers:
+        fields = {
+            "id": lyr.id,
+            "name": lyr.name,
+            "group": lyr.group,
+            "color": lyr.color,
+            "colorBy": {"attribute": lyr.color_by.attribute, "scale": lyr.color_by.scale},
+            "entityTypes": [t.value for t in lyr.entity_types],
+            "render": lyr.render,
+            "update": lyr.update,
+            "altitude": lyr.altitude,
+            "defaultVisible": lyr.default_visible,
+            "tiled": lyr.tiled,
+            "sources": lyr.sources,
+            "description": lyr.description,
+            "maxAgeS": lyr.max_age_seconds,
+            "attribution": lyr.attribution,
+        }
         ts.append("  {")
-        ts.append(f"    id: '{lyr.id}',")
-        ts.append(f"    name: {lyr.name!r}".replace("'", '"', 0).replace("name: '", "name: '"))
-        ts[-1] = f"    name: '{lyr.name.replace(chr(39), chr(92) + chr(39))}',"
-        ts.append(f"    group: '{lyr.group}',")
-        ts.append(f"    color: '{lyr.color}',")
-        ts.append(f"    colorBy: {{ attribute: '{lyr.color_by.attribute}', scale: '{lyr.color_by.scale}' }},")
-        ts.append(f"    entityTypes: [{', '.join(repr(str(t)).replace(chr(34), chr(39)) for t in lyr.entity_types)}],")
-        ts.append(f"    render: '{lyr.render}',")
-        ts.append(f"    update: '{lyr.update}',")
-        ts.append(f"    altitude: '{lyr.altitude}',")
-        ts.append(f"    defaultVisible: {'true' if lyr.default_visible else 'false'},")
-        ts.append(f"    tiled: {'true' if lyr.tiled else 'false'},")
-        ts.append(f"    sources: [{', '.join(repr(s).replace(chr(34), chr(39)) for s in lyr.sources)}],")
-        ts.append(f"    description: '{lyr.description.replace(chr(39), chr(92) + chr(39))}',")
+        ts += [f"    {name}: {_ts_literal(value)}," for name, value in fields.items()]
         ts.append("  },")
     ts += ["];", ""]
     LAYERS_TS.parent.mkdir(parents=True, exist_ok=True)
@@ -188,7 +205,6 @@ def scaffold(cat: Catalog, ids: list[str]) -> None:
             base=base, cls=cls, method=method, sig=sig,
         ), encoding="utf-8")
         print(f"wrote {path.relative_to(ROOT)} — remember to import it in modules/impl/__init__.py")
-        _ = EntityType  # keep import referenced for the template
 
 
 def stats(cat: Catalog) -> None:

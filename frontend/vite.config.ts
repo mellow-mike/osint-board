@@ -6,6 +6,8 @@ import { viteStaticCopy } from 'vite-plugin-static-copy';
 
 // Cesium ships workers/assets/widgets that must be served as static files.
 // They are copied to /cesium/ and CESIUM_BASE_URL is set in index.html before Cesium loads.
+// vite-plugin-static-copy v4 keeps the source path (node_modules/cesium/Build/Cesium/Workers/...), so the four
+// leading segments are stripped: without that every worker, texture and the imagery 404 to index.html.
 const cesiumSource = 'node_modules/cesium/Build/Cesium';
 const cesiumBaseUrl = 'cesium';
 
@@ -14,7 +16,11 @@ export default defineConfig({
     react(),
     tailwindcss(),
     viteStaticCopy({
-      targets: ['Workers', 'ThirdParty', 'Assets', 'Widgets'].map((dir) => ({ src: `${cesiumSource}/${dir}`, dest: cesiumBaseUrl })),
+      targets: ['Workers', 'ThirdParty', 'Assets', 'Widgets'].map((dir) => ({
+        src: `${cesiumSource}/${dir}`,
+        dest: cesiumBaseUrl,
+        rename: { stripBase: cesiumSource.split('/').length },
+      })),
     }),
   ],
   define: { CESIUM_BASE_URL: JSON.stringify(`/${cesiumBaseUrl}/`) },

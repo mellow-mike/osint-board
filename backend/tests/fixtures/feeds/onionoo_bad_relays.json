@@ -1,0 +1,6 @@
+{"version":"9.0","relays_published":"2026-09-24 12:00:00","relays":[
+ {"nickname":"GoodExit","fingerprint":"AAAA0000BBBB1111CCCC2222DDDD3333EEEE4444","or_addresses":["198.51.100.7:9001"],"exit_addresses":["198.51.100.7"],"last_seen":"2026-09-24 12:00:00","running":true,"flags":["Exit","Fast","Running","Valid"],"country":"de","city_name":"Berlin","latitude":52.52,"longitude":13.405,"as":"AS64500","consensus_weight":1200},
+ {"nickname":"BadAddresses","fingerprint":"FFFF0000BBBB1111CCCC2222DDDD3333EEEE5555","or_addresses":5,"last_seen":"2026-09-24 12:00:00","running":true,"flags":["Guard"],"latitude":48.85,"longitude":2.35},
+ {"nickname":"NoFlags","fingerprint":"1234000000000000000000000000000000000000","or_addresses":["[2001:db8::1]:443"],"last_seen":"2026-09-24 12:00:00","running":true,"flags":null,"latitude":"north","longitude":2.35},
+ "not a relay"
+]}

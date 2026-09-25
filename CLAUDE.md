@@ -13,10 +13,11 @@ Read `docs/README.md` first. The rules below keep the project coherent across se
 ## Commands
 
 ```bash
-make check                                  # ruff, pytest, catalog validate, frontend build (what CI runs)
+make check                                  # ruff, pytest, catalog validate + docs diff, frontend lint/build/test (what CI runs)
 cd backend && uv run pytest -q              # backend tests are offline; fixtures live in backend/tests/fixtures
 cd backend && uv run python ../scripts/catalog.py validate|docs|scaffold <id>
-cd frontend && pnpm typecheck && pnpm build && pnpm test
+cd frontend && pnpm typecheck && pnpm build && pnpm test   # needs Node 22+ (vitest/rolldown fail on 18)
+make soak                                   # 24 h feed soak on an isolated db/redis → data/soak/<run>/report.md
 ```
 
 ## Invariants
@@ -31,7 +32,12 @@ cd frontend && pnpm typecheck && pnpm build && pnpm test
   (`backend/osint_board/geo/precision.py` and `frontend/src/globe/renderers/HaloLayer.ts` share the radii).
 - **Every geo feature carries a precision and a source.** Use `GeoPoint(precision=..., source=...)`.
 - **Tiered/commercial APIs are optional inputs**, never hard dependencies: their capability must be reachable
-  through the internal service named in `replacement:`.
+  through the internal service named in `replacement:` (e.g. `opensky` answers keylessly through `adsb_network`,
+  `backend/osint_board/modules/adsb.py`; OpenSky itself stays off unless configured).
+- **Feeds must survive unattended.** Feed modules raise `MissingSecret` (via `ctx.require_secret`) for missing
+  keys and `RetryLater` when an upstream says when to come back; never loop on errors or re-download on restart.
+- **The 24 h soak is a soft gate.** Run `make soak` after every milestone and record its verdict in the PR; triage
+  what it finds, but never block a merge or pause work waiting for it. `make check` is the hard gate.
 
 ## Frontend stack
 

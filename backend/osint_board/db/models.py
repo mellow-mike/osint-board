@@ -123,6 +123,17 @@ class ModuleSetting(Base):
     )
 
 
+class FeedState(Base):
+    """Last successful poll per feed, so a restart waits until the next poll is due (``feeds/state.py``)."""
+
+    __tablename__ = "feed_state"
+    module_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    last_ok: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class GeoEvent(Base):
     """Timestamped occurrences (earthquakes, fires, conflict, news). TimescaleDB hypertable on ``time``."""
 

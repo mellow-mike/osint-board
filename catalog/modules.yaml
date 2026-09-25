@@ -5,7 +5,7 @@
 # Regenerate docs/modules/CATALOG.md with:
 #     python scripts/catalog.py docs
 #
-# Field vocabulary (enforced by scripts/catalog.py and backend/osint_board/modules/manifest.py):
+# Field vocabulary (enforced by scripts/catalog.py and backend/osint_board/catalog/models.py):
 #   source_type : free_api | tiered_api | commercial_api | internal | tool   (as classified in the CSV)
 #   category    : functional grouping (see docs/03-module-framework.md)
 #   mode        : lookup (target-driven) | feed (continuous global ingest) | extract (runs over collected content)
@@ -17,7 +17,8 @@
 #   produces    : entity types emitted
 #   geo         : direct (emits coordinates) | derived (emits entities the geo pipeline can resolve) | none
 #   layer       : default globe layer for produced geo features (catalog/layers.yaml)
-#   phase       : 1 free APIs + core internals · 2 remaining internals + tools · 3 tiered replacements · 4 commercial replacements
+#   phase       : 1 free APIs + core internals · 2 remaining internals + tools + live aircraft (opensky via adsb_network)
+#                 · 3 tiered replacements · 4 commercial replacements
 #   priority    : high | normal | low (ordering inside a phase)
 #   replacement : internal service ids (catalog/services.yaml) that replace this module; 'local_reimpl' = trivially reimplemented in-process
 #   cadence     : feed refresh cadence (realtime | 5s | 1m | 15m | hourly | 3h | daily | weekly | monthly | on_demand)
@@ -2932,9 +2933,10 @@ modules:
     phase: 1
     priority: high
     replacement: *id001
-    cadence: monthly
+    cadence: daily
     notes: >-
-      ~40M towers. Ingest the full monthly CSV dump into a PostGIS table served as vector tiles; API for point queries.
+      ~40M towers. The default mode ingests the daily diff (catching up missed days); config mode=full streams the full
+      dump (at most once a month). Serve as vector tiles from PostGIS; API for point queries.
   - id: opencorporates
     name: OpenCorporates
     url: https://opencorporates.com
@@ -3026,14 +3028,19 @@ modules:
       - position
     geo: direct
     layer: aviation
-    phase: 3
+    phase: 2
     priority: high
     replacement:
       - adsb_network
     cadence: 5s
     notes: >-
-      Anonymous: 400 credits/day, 10s resolution; registered: 4,000 credits/day, 5s. Replacement aggregates community feeds
-      (adsb.lol, adsb.fi, airplanes.live) and our own RTL-SDR receivers.
+      Works with no key: each 5 s poll is one round of the in-process adsb_network seed (modules/adsb.py), which asks
+      adsb.lol and adsb.fi for the most overdue 250 nm tiles of a world grid (0.5 req/s per provider) and reads any own
+      readsb/dump1090 receivers (OSINT_MODULE_OPENSKY_CONFIG receivers). OpenSky itself is an optional accelerator, off by
+      default because its terms of use appear to require a written licence for operational use of the REST API (review
+      them before enabling): OSINT_MODULE_OPENSKY_CLIENT_ID + OSINT_MODULE_OPENSKY_CLIENT_SECRET (OAuth2 client
+      credentials; 4,000 credits/day, a global snapshot every 86 s, 5 s resolution) or config {"opensky": {"anonymous":
+      true}} (400 credits/day, every 14.4 min, 10 s resolution).
   - id: page_info
     name: Page Information
     url: null

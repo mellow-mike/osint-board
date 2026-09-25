@@ -1,7 +1,8 @@
 # 07 — Internal replacements for tiered and commercial APIs
 
 The CSV lists 70 tiered and 11 commercial APIs. The plan is not to re-implement each vendor one by one but to
-build **24 internal services** that cover the same capabilities from open data, our own collection and our own
+build **internal services** (26 entries in `catalog/services.yaml`: 2 in phase 1, 1 in phase 2, 19 in phase 3,
+4 in phase 4) that cover the same capabilities from open data, our own collection and our own
 infrastructure — and to keep the vendor modules as optional accelerators when an operator has keys.
 
 The authoritative list, with data sources, method, freshness/density targets and effort, is
@@ -45,7 +46,7 @@ The authoritative list, with data sources, method, freshness/density targets and
 | breach_corpus | Dehashed, HIBP paid, IntelX | HIBP domain search (free), Pwned Passwords, published notifications, licensed datasets | Within the operator's legal remit only | M |
 | ai_analyst | Perplexity Sonar | RAG over our index + meta_search, local LLM by default | Cites our evidence store; can run offline | M |
 | conflict_events | ACLED | GDELT, UCDP GED, ReliefWeb, NLP geocoding | Hourly vs weekly; shows confidence | M |
-| adsb_network | OpenSky | adsb.lol / adsb.fi / airplanes.live / ADSB.one + own receivers | 1–5 s updates, no credits | M |
+| adsb_network | OpenSky | adsb.lol / adsb.fi (keyless, tiled 250 nm queries) + own receivers; OpenSky as an optional accelerator; airplanes.live / ADSB.one need an arrangement | No key and no credit budget; merged by ICAO24 with provenance; faster once we feed | M |
 | weather_service | Windy / Saildrone | Open-Meteo, NOAA GFS, NDBC, Argo, METAR | Free, global, includes ocean in-situ data | S |
 | geocoder | Google Maps, public Nominatim limits | Photon + Nominatim self-hosted | Unlimited, private, precision-aware | M |
 | app_intel | Koodous, CRXcavator | iTunes Search, Play/Chrome/AMO store search | Cross-store | S |
@@ -63,14 +64,17 @@ The authoritative list, with data sources, method, freshness/density targets and
 | New certificate visibility | minutes (CertSpotter) | minutes (CT tailing) |
 | New domain visibility | daily (zone files, paid) | daily (CZDS, free) |
 | Scan freshness (authorised scope) | days–weeks | minutes–hours |
-| Aircraft positions | 5–10 s (OpenSky) | 1–5 s |
+| Aircraft positions | 5–10 s (OpenSky, credit-limited) | today minutes (busy airspace every 2–5 min, quiet areas up to 3 h); 1 s from own receivers; the 1–5 s target needs feeding the aggregators for their whole-network endpoints |
 | Conflict events | weekly (ACLED) | hourly |
 | Weather | hourly | hourly obs, 6-hourly model runs |
 
 ## Sequencing
 
-Phase 3 builds, in order: `threat_lists` (already needed by phase 1), `geoip`, `meta_search`, `geocoder`,
-`phone_intel`, `weather_service`, `adsb_network`, `pdns` then `subdomain_engine` then `whois_archive`,
+Phase 1 seeded `threat_lists` (`modules/lists.py`); phase 2 pulled `adsb_network` forward (`modules/adsb.py`,
+behind the `opensky` module) because the aviation layer had no free source — see
+[04-feeds-and-ingestion.md](04-feeds-and-ingestion.md#aviation-opensky-via-adsb_network).
+Phase 3 builds, in order: `geoip`, `meta_search`, `geocoder`,
+`phone_intel`, `weather_service`, `pdns` then `subdomain_engine` then `whois_archive`,
 `tech_fingerprint`, `email_intel`, `company_intel`, `conflict_events`, `crypto_intel`, `app_intel`,
 `bucket_hunter`, `paste_monitor`, `social_engine`, `threat_scoring`, `scanner` (on-demand tier).
 Phase 4: `darkweb_crawler`, `breach_corpus`, `ai_analyst`, `p2p_monitor`, `scanner` continuous tier.

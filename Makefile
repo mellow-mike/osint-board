@@ -39,16 +39,41 @@ frontend-dev: ## Vite dev server on :5173 (proxies /api to :8000)
 frontend-build: ## Typecheck + production build
 	cd frontend && pnpm build
 
+frontend-lint: ## ESLint
+	cd frontend && pnpm lint
+
+frontend-test: ## Vitest unit tests
+	cd frontend && pnpm test
+
 # ---- catalog -------------------------------------------------------------------------------------
 catalog-validate: ## Validate catalog/*.yaml against the CSV and vocabulary
-	python3 scripts/catalog.py validate
+	cd backend && uv run python ../scripts/catalog.py validate
 
-catalog-docs: ## Regenerate docs/modules/CATALOG.md and frontend layer registry
-	python3 scripts/catalog.py docs
+catalog-docs: ## Regenerate docs/modules/CATALOG.md and frontend/src/layers/generated.ts
+	cd backend && uv run python ../scripts/catalog.py docs
+
+GENERATED = docs/modules/CATALOG.md frontend/src/layers/generated.ts
+catalog-docs-check: ## Fail if regenerating the catalog files changes them (CI diffs them the same way)
+	@before="$$(cat $(GENERATED) | sha256sum)"; \
+	(cd backend && uv run python ../scripts/catalog.py docs >/dev/null) || exit 1; \
+	test "$$before" = "$$(cat $(GENERATED) | sha256sum)" || \
+	  { echo "catalog docs were out of date and have been regenerated: commit $(GENERATED)"; exit 1; }
+
+# ---- soak ----------------------------------------------------------------------------------------
+# Detached (survives logout): setsid nohup scripts/soak.sh --infra > /dev/null 2>&1 &   (scripts/soak.sh --help)
+SOAK_ARGS ?= --infra
+SOAK_DIR = $(abspath $(or $(DIR),$(lastword $(sort $(wildcard data/soak/*/)))))
+
+soak: ## 24 h feed soak on an isolated db/redis; report in data/soak/<ts>/ (SOAK_ARGS="--sink null --hours 1")
+	scripts/soak.sh $(SOAK_ARGS)
+
+soak-report: ## Rebuild a soak report (DIR=data/soak/<ts>; default: the newest run)
+	@test -n "$(SOAK_DIR)" || { echo "no soak run under data/soak (pass DIR=...)"; exit 1; }
+	cd backend && uv run osint-board soak report "$(SOAK_DIR)"
 
 # ---- infra ---------------------------------------------------------------------------------------
 infra: ## Start db, redis and meilisearch only (for local dev)
-	docker compose up -d db redis meilisearch
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d db redis meilisearch
 
 up: ## Start the whole stack
 	docker compose up -d --build
@@ -56,4 +81,4 @@ up: ## Start the whole stack
 down: ## Stop the stack
 	docker compose down
 
-check: backend-lint backend-test catalog-validate frontend-build ## Everything CI runs
+check: backend-lint backend-test catalog-validate catalog-docs-check frontend-lint frontend-build frontend-test ## Everything CI runs
