@@ -14,7 +14,8 @@ catalog, run by the singleton `osint-board feeds` process, and write to the glob
   backoff.
 - `DbSink` upserts and publishes deltas; `MemorySink` is used by tests and `osint-board feeds --once <id>`.
   Events go to `geo_events`, vessels/aircraft to `tracks` + `track_positions`, element sets to `satellites`,
-  and cell towers / Wi-Fi access points / Tor relays to `static_features` (upsert on `(layer, key)`).
+  and cell towers / Wi-Fi access points / Tor relays to `static_features` (upsert on `(layer, key)`). Every
+  row's props carry the fix's `precision` and `geo_source`, which the globe uses to draw halos instead of pins.
 - A lookup module that also implements `FeedModule` and has a catalog `cadence` (`tor_exit_nodes`) is
   scheduled like a feed; `cadence: on_demand` modules (`wigle`) never are.
 

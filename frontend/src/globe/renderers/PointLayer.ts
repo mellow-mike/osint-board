@@ -60,6 +60,13 @@ export class PointLayer implements LayerRenderer {
     this.index.set(f.id, p);
   }
 
+  remove(id: string): void {
+    const p = this.index.get(id);
+    if (!p) return;
+    this.points.remove(p);
+    this.index.delete(id);
+  }
+
   setVisible(visible: boolean): void {
     this.points.show = visible;
   }

@@ -36,6 +36,15 @@ _TRACKS_SQL = text(
     LIMIT :limit
     """
 )
+_STATIC_SQL = text(
+    """
+    SELECT key, props->>'name' AS name, ST_X(geom) AS lon, ST_Y(geom) AS lat, props, updated_at AS time
+    FROM static_features
+    WHERE layer = :layer
+      AND (:bbox IS NULL OR geom && ST_MakeEnvelope(:minx, :miny, :maxx, :maxy, 4326))
+    LIMIT :limit
+    """
+)
 _SATS_SQL = text(
     'SELECT norad_id, name, line1, line2, epoch, object_class, "group" FROM satellites ORDER BY norad_id LIMIT :limit'
 )
@@ -105,6 +114,8 @@ async def features(
     now = datetime.now(tz=UTC)
     since_dt = parse_time(since, now) if since else now - timedelta(hours=24)
     params = {"layer": layer_id, "since": since_dt, "until": now, "limit": limit, **_parse_bbox(bbox)}
+    if layer.tiled and not bbox:  # tens of millions of rows: a global GeoJSON dump is never what the client wants
+        raise HTTPException(400, f"layer {layer_id} is tiled; pass bbox= or use /tiles/{{z}}/{{x}}/{{y}}.mvt")
 
     try:
         if layer.id == "space":
@@ -130,6 +141,12 @@ async def features(
         elif layer.group == "live":
             rows = (await session.execute(_TRACKS_SQL, params)).all()
             feats = [_feature(r, layer_id) for r in rows]
+        elif layer.group == "static":  # feeds upsert these into static_features (feeds/db_sink.py)
+            rows = (await session.execute(_STATIC_SQL, params)).all()
+            etype = layer.entity_types[0].value if layer.entity_types else None
+            feats = [_feature(r, layer_id) for r in rows]
+            for f in feats:
+                f["properties"].setdefault("entity_type", etype)
         elif layer.group == "investigation":
             rows = (
                 await session.execute(

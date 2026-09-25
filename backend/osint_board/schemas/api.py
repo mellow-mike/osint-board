@@ -60,6 +60,32 @@ class EntityOut(BaseModel):
     geo_source: str | None = None
 
 
+class GraphNode(BaseModel):
+    id: uuid.UUID
+    type: str
+    value: str
+    confidence: float
+    source_module: str | None = None
+    lat: float | None = None
+    lon: float | None = None
+    geo_precision: str | None = None
+    degree: int = 0
+
+
+class GraphEdge(BaseModel):
+    source: uuid.UUID
+    target: uuid.UUID
+    rel_type: str
+    source_module: str
+    confidence: float
+
+
+class GraphOut(BaseModel):
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+    truncated: bool = False  # more entities than ``limit``; the most recently seen are returned
+
+
 class FeatureCollection(BaseModel):
     type: str = "FeatureCollection"
     features: list[dict[str, Any]] = Field(default_factory=list)

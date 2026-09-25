@@ -18,6 +18,12 @@ feeds. Build `threat_lists` early (it underpins reputation).
 **Exit:** live vessels, aircraft, satellites, fires, quakes, news, cell towers and Tor relays on the globe from
 free sources; 90+ modules implemented and tested; a domain or IP investigation produces a connected graph and
 places its infrastructure correctly; feeds survive 24 h.
+*Status:* all 109 modules implemented with offline fixture tests (plus three phase-2 extractors pulled
+forward). Vessels, satellites, fires, quakes, news, cell towers (viewport-fetched) and Tor relays reach the
+globe, coarse positions as halos; a lookup's pages and documents run through the extractors and the
+investigation graph (`/api/investigations/{id}/graph`) links findings to the content they came from. Open:
+aircraft from a free source (the `aviation` layer's only source, `opensky`, is catalogued for phase 3 behind
+`adsb_network`), and the 24-hour feed soak.
 
 ## Phase 2 — Remaining internals and external tools (42 modules)
 

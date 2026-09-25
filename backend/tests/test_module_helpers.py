@@ -8,7 +8,16 @@ from datetime import UTC, datetime
 from osint_board.entities.types import EntityType
 from osint_board.modules.buckets import classify, parse_listing, permutations
 from osint_board.modules.dnsutil import DnsAnswer, classify_filtered, interpret_codes, reverse_labels
-from osint_board.modules.helpers import host_of, hosts_in, name_candidates, registrable_domain, to_datetime, verdict
+from osint_board.modules.helpers import (
+    host_emit,
+    host_of,
+    host_ref,
+    hosts_in,
+    name_candidates,
+    registrable_domain,
+    to_datetime,
+    verdict,
+)
 from osint_board.modules.lists import IndicatorList, match, parse_csv, parse_lines
 from osint_board.modules.rdap import parse_rdap, rdap_path, record_emits
 from osint_board.modules.types import EntityRef
@@ -129,3 +138,14 @@ def test_rdap_parse_and_emits(fixtures_dir):
         rdap_path(EntityRef(EntityType.ASN, "AS64500")) == "/autnum/64500"
         and rdap_path(EntityRef(EntityType.EMAIL, "a@b")) is None
     )
+
+
+def test_host_ref_matches_host_emit():
+    target = EntityRef(EntityType.DOMAIN, "example.com")
+    for host in ("example.com", "Mail.Example.com."):
+        emitted = host_emit(host, "example.com", target)
+        assert host_ref(host, "example.com") == EntityRef(emitted.type, emitted.value)
+    email = verdict(
+        EntityRef(EntityType.EMAIL, "a@example.com"), "src", label="disposable", etype=EntityType.EMAIL_VERDICT
+    )
+    assert email.type is EntityType.EMAIL_VERDICT and email.value == "src: a@example.com disposable"

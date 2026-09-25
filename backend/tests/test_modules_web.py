@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from osint_board.entities.types import EntityType
 from osint_board.modules.impl.commoncrawl import parse_collinfo
 from osint_board.modules.impl.zone_h import parse_rss
@@ -156,3 +158,29 @@ async def test_openbugbounty_and_hackerone(fake_http, run_lookup):
         "hackerone report 123456: XSS on www.example.com",
         "hackerone report 123457: Open redirect in example.com login",
     ]
+
+
+async def test_stackoverflow(fake_http, run_lookup, registry):
+    from osint_board.modules.extraction import ExtractorPipeline
+
+    fake_http.route("api.stackexchange.com/2.3/search/advanced", file="web/stackexchange_search.json")
+    emits = await run_lookup("stackoverflow", "domain", "example.com")
+    by = _by_type(emits)
+    q1 = "https://stackoverflow.com/questions/76712345/curl-ssl-error-with-api-example-com"
+    assert by[EntityType.URL] == [q1, "https://stackoverflow.com/questions/77001234/mx-records-for-example-com"]
+    assert by[EntityType.USERNAME] == ["jdoe_dev"]  # deleted accounts are skipped
+    url = next(e for e in emits if e.value == q1 and e.type is EntityType.URL)
+    assert url.meta["title"] == 'cURL SSL error with api.example.com "certificate has expired"'
+    assert url.meta["created"].year == 2023 and url.meta["tags"] == ["php", "curl", "ssl"]
+    user = next(e for e in emits if e.type is EntityType.USERNAME)
+    assert user.parent.value == q1 and user.meta["profile"] == "https://stackoverflow.com/users/7654321/jdoe-dev"
+    params = fake_http.calls[0][2]["params"]
+    assert params["q"] == "example.com" and params["filter"] == "withbody" and "key" not in params
+    found = ExtractorPipeline(registry).run(emits)
+    assert {(e.value, e.parent.value) for e in found["email_extractor"]} == {("support@example.com", q1)}
+
+    fake_http.routes.clear()
+    fake_http.route("api.stackexchange.com", file="web/stackexchange_throttle.json", status=400)
+    with pytest.raises(RuntimeError, match="throttle_violation"):
+        await run_lookup("stackoverflow", "domain", "example.com", config={"api_key": "k"})
+    assert fake_http.calls[-1][2]["params"]["key"] == "k"

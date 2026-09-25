@@ -10,7 +10,9 @@ import { useStore } from '../state/store';
 import { HaloLayer } from './renderers/HaloLayer';
 import { OrbitLayer } from './renderers/OrbitLayer';
 import { PointLayer } from './renderers/PointLayer';
+import { PrecisionSplitLayer } from './renderers/PrecisionSplitLayer';
 import type { LayerRenderer, RenderFeature } from './renderers/types';
+import { tiledInRange, type Viewport } from './viewport';
 
 function toRenderFeature(layer: string, f: GeoFeature): RenderFeature | null {
   if (!f.geometry) {
@@ -26,9 +28,17 @@ function makeRenderer(viewer: Cesium.Viewer, spec: LayerSpec): LayerRenderer {
       return new OrbitLayer(viewer, spec);
     case 'halos':
       return new HaloLayer(viewer, spec);
-    default:
-      return new PointLayer(viewer.scene, spec);
+    default: // pins for exact/rooftop/street only; anything coarser becomes a halo
+      return new PrecisionSplitLayer(new PointLayer(viewer.scene, spec), new HaloLayer(viewer, spec));
   }
+}
+
+/** Tiled layers hold millions of rows: fetch only what the camera sees, and nothing when zoomed out. */
+async function viewportFeatures(layerId: string, viewport: Viewport | null): Promise<FeatureCollection> {
+  if (!tiledInRange(viewport)) return { type: 'FeatureCollection', features: [], layer: layerId, count: 0, generated_at: null };
+  const parts = await Promise.all(viewport.bboxes.map((bbox) => api.features(layerId, { bbox, limit: 20000 })));
+  const features = parts.flatMap((p) => p.features);
+  return { ...parts[0]!, features, count: features.length };
 }
 
 /** Creates one renderer per catalog layer, feeds it from /api/layers/{id}/features and from the live stream. */
@@ -36,6 +46,7 @@ export function useLayerRendering(viewer: Cesium.Viewer | null): void {
   const visible = useStore((s) => s.visible);
   const timeWindow = useStore((s) => s.timeWindow);
   const setCount = useStore((s) => s.setCount);
+  const viewport = useStore((s) => s.viewport);
   const renderers = useRef(new Map<string, LayerRenderer>());
 
   useEffect(() => {
@@ -51,13 +62,23 @@ export function useLayerRendering(viewer: Cesium.Viewer | null): void {
   const activeLayers = useMemo(() => LAYERS.filter((l) => visible[l.id]), [visible]);
 
   const queries = useQueries({
-    queries: activeLayers.map((l) => ({
-      queryKey: ['features', l.id, l.group === 'events' || l.group === 'live' ? timeWindow : 'all'],
-      queryFn: () => api.features(l.id, { since: l.group === 'static' ? undefined : timeWindow, limit: 20000 }),
-      refetchInterval: pollIntervalMs(l.update) ?? false,
-      staleTime: 30_000,
-      enabled: !!viewer,
-    })),
+    queries: activeLayers.map((l) =>
+      l.tiled
+        ? {
+            queryKey: ['features', l.id, tiledInRange(viewport) ? viewport.bboxes.join('|') : 'zoomed-out'],
+            queryFn: () => viewportFeatures(l.id, viewport),
+            refetchInterval: false as const,
+            staleTime: 300_000,
+            enabled: !!viewer,
+          }
+        : {
+            queryKey: ['features', l.id, l.group === 'events' || l.group === 'live' ? timeWindow : 'all'],
+            queryFn: () => api.features(l.id, { since: l.group === 'static' ? undefined : timeWindow, limit: 20000 }),
+            refetchInterval: pollIntervalMs(l.update) ?? false,
+            staleTime: 30_000,
+            enabled: !!viewer,
+          },
+    ),
   });
 
   useEffect(() => {

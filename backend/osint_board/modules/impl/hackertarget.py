@@ -10,7 +10,7 @@ from collections.abc import AsyncIterator
 
 from osint_board.entities.types import EntityType
 from osint_board.modules.base import LookupModule
-from osint_board.modules.helpers import dedupe, host_emit
+from osint_board.modules.helpers import dedupe, host_emit, host_ref
 from osint_board.modules.registry import module
 from osint_board.modules.types import Emit, EntityRef
 
@@ -42,7 +42,7 @@ def parse_hostsearch(text: str, domain: str, target: EntityRef) -> list[Emit]:
                 EntityType.IP,
                 ip.strip(),
                 relation="resolves_to",
-                parent=EntityRef(EntityType.HOSTNAME, host),
+                parent=host_ref(host, domain),
                 meta={"host": host, "source": "hackertarget"},
             )
         )

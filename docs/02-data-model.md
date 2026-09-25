@@ -23,9 +23,13 @@ from feeds dedupe too). Columns: `value` (as seen), `normalized` (canonical form
 
 **relations** — directed edges `from_id -> to_id` with `rel_type` (`resolves_to`, `subdomain_of`,
 `issued_for`, `lists`, `mentioned_in`), `source_module`, `confidence`. Unique per (from, to, type, module).
+An edge runs from the emission's `parent` (the run's target when unset) to the emission, so a module run can
+produce a chain (`domain -> url -> raw_content -> email`) rather than a star. `GET
+/api/investigations/{id}/graph` serves entities and the edges between them.
 
 **observations** — the raw payload a module produced for an entity, with `module_id`, `run_id`, `observed_at`.
-Never deleted by enrichment; this is the evidence trail.
+Never deleted by enrichment; this is the evidence trail. Fetched text (`raw_content`) lives here in full; the
+entity row keeps a short `excerpt` and `chars`.
 
 **module_runs** — status (`queued|running|done|error|refused`), timing, stats; `refused` records an active
 module blocked by scope.
@@ -46,7 +50,8 @@ retention) holds the history.
 **satellites** — NORAD id, name, TLE lines, epoch, object class, group. Positions are derived, never stored.
 
 **static_features** — slow-changing reference points (cell towers, Wi-Fi APs, Tor relays) with a GiST index;
-served as Mapbox vector tiles.
+`props` carries `precision` and `geo_source` like every placed feature. Served as GeoJSON by
+`/api/layers/{id}/features` (tiled layers require `bbox=`) and as Mapbox vector tiles.
 
 ## Search documents (Meilisearch `entities`)
 

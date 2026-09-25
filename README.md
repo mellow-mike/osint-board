@@ -7,9 +7,10 @@ everything with a location lands on the globe in the right place, at the right p
 and colour coding. A fast, type-aware search box is the entry point to every investigation.
 
 > Status: **phase 1 in progress**. The architecture, catalog, documentation, deployment files and the core code
-> paths are in place and tested; every free API in the catalog that still exists is wired up (108 modules with
-> offline fixture tests, including the AIS, GDELT, OpenCellID and Tor feeds), and the remaining internal and
-> tiered replacements follow the phases described in [docs/09-roadmap.md](docs/09-roadmap.md).
+> paths are in place and tested; every free API in the catalog that still exists is wired up, and all 109
+> phase-1 modules are implemented (112 modules with offline fixture tests, including the AIS, GDELT, OpenCellID
+> and Tor feeds and a polite web spider whose pages feed the extractors). The remaining internal and tiered
+> replacements follow the phases described in [docs/09-roadmap.md](docs/09-roadmap.md).
 
 ## What it does
 

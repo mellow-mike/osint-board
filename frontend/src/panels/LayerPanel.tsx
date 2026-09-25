@@ -1,6 +1,7 @@
 import { Button, Chip, Label, Separator, Surface, Switch } from '@heroui/react';
 import { Layers } from 'lucide-react';
 
+import { tiledInRange } from '../globe/viewport';
 import { GROUP_LABELS, LAYERS } from '../layers/registry';
 import type { LayerSpec } from '../layers/types';
 import { useStore, type TimeWindow } from '../state/store';
@@ -14,6 +15,7 @@ export function LayerPanel() {
   const setLayerVisible = useStore((s) => s.setLayerVisible);
   const timeWindow = useStore((s) => s.timeWindow);
   const setTimeWindow = useStore((s) => s.setTimeWindow);
+  const zoomedIn = useStore((s) => tiledInRange(s.viewport));
 
   return (
     <Surface variant="secondary" className="panel w-64 max-h-[calc(100vh-7rem)] overflow-y-auto p-3 text-sm">
@@ -48,10 +50,17 @@ export function LayerPanel() {
                       </Label>
                     </Switch.Content>
                   </Switch>
-                  {visible[l.id] && counts[l.id] !== undefined && (
+                  {visible[l.id] && l.tiled && !zoomedIn ? (
                     <Chip size="sm" variant="soft" className="ml-auto">
-                      <Chip.Label>{counts[l.id]}</Chip.Label>
+                      <Chip.Label>zoom in</Chip.Label>
                     </Chip>
+                  ) : (
+                    visible[l.id] &&
+                    counts[l.id] !== undefined && (
+                      <Chip size="sm" variant="soft" className="ml-auto">
+                        <Chip.Label>{counts[l.id]}</Chip.Label>
+                      </Chip>
+                    )
                   )}
                 </li>
               ))}

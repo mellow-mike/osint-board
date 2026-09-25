@@ -61,6 +61,13 @@ def hosts_in(netblock: str, limit: int = 256) -> list[str]:
     return out
 
 
+def host_ref(host: str, domain: str) -> EntityRef:
+    """Reference to a discovered host typed the way :func:`host_emit` emits it (the apex is a ``domain``), for
+    emissions that hang off that host (``host --resolves_to--> ip``)."""
+    host = host.lower().rstrip(".")
+    return EntityRef(EntityType.DOMAIN if host == domain else EntityType.HOSTNAME, host)
+
+
 def host_emit(host: str, domain: str, parent: EntityRef | None, confidence: float = 0.9, **meta: Any) -> Emit:
     """Emit a discovered host as ``hostname`` (or ``domain`` when it *is* the apex) related to the target."""
     host = host.lower().rstrip(".")
@@ -76,15 +83,17 @@ def verdict(
     category: str | None = None,
     indicator: str | None = None,
     confidence: float = 0.9,
+    etype: EntityType = EntityType.VERDICT,
     **meta: Any,
 ) -> Emit:
-    """A :data:`EntityType.VERDICT` about ``target`` from ``source`` (``target --flagged_by--> verdict``).
+    """A :data:`EntityType.VERDICT` (or ``etype``: ``email_verdict``, ``classification`` ...) about ``target`` from
+    ``source`` (``target --flagged_by--> verdict``).
 
     The value is stable per (source, indicator, label) so repeated runs dedupe; details live in ``meta``.
     """
     indicator = indicator or target.value
     return Emit(
-        type=EntityType.VERDICT,
+        type=etype,
         value=f"{source}: {indicator} {label}",
         confidence=confidence,
         relation="flagged_by",
