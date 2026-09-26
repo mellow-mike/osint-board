@@ -117,7 +117,15 @@ class ModuleContext:
         return value
 
     def check_authorized(self, target: EntityRef) -> None:
-        if self.spec.requires_authorization and not self.scope.permits_active(target):
+        """Refuse an active module unless it is allowed to run against ``target``.
+
+        ``OSINT_PASSIVE_ONLY`` (``settings.passive_only``, the default) is the master switch: while it is on, a
+        module with ``requires_authorization`` needs an investigation scope that names the target. An operator who
+        turns it off has opted the whole instance into active scanning, so the per-scope gate no longer applies.
+        """
+        if not self.spec.requires_authorization:
+            return
+        if self.settings.passive_only and not self.scope.permits_active(target):
             raise AuthorizationError(
                 f"{self.spec.id} is an active module; {target.value} is not in an authorised scope"
             )

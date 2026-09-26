@@ -71,8 +71,13 @@ layers/services referenced exist, feeds have cadences, paid modules name a repla
 
 ## Authorisation and safety
 
-- `ModuleContext.check_authorized(target)` raises unless `scope.allow_active` and the target is inside
-  `scope.targets` (domains or CIDRs). Investigations carry the scope; the CLI has `--allow-active`.
+- `ModuleContext.check_authorized(target)` gates a module with `requires_authorization: true`. While
+  `OSINT_PASSIVE_ONLY` is on (`settings.passive_only`, the default) it raises unless `scope.allow_active` and the
+  target is inside `scope.targets` (domains or CIDRs); turning `OSINT_PASSIVE_ONLY` off opts the whole instance
+  into active scanning and lifts the per-scope gate. Investigations carry the scope; the CLI has `--allow-active`.
+  An active module also calls `check_authorized` itself at the top of `lookup`, so it is refused even when run
+  directly, not only through the worker. The active modules today are `dns_bruteforce`, `dns_axfr`,
+  `port_scanner` and the `tool_*` scanners.
 - `HttpClient` applies a token bucket per module (`rate_per_sec`), retries on 429/5xx with backoff, honours
   `Retry-After` (seconds or HTTP date) and `X-Rate-Limit-Retry-After-Seconds` up to 2 min (a longer ask returns
   the response to the module instead of sleeping), sends a stable User-Agent and routes through
@@ -143,6 +148,12 @@ nameserver), `run_lookup` and `run_poll` (instantiate a module from the registry
 | `dns_resolver` | lookup (internal) | Forward/reverse DNS with dnspython |
 | `web_spider` | lookup (internal) | Polite crawl (robots.txt, crawl delay, per-host concurrency, depth/page/time limits) whose pages feed the extractors |
 | `email_extractor` | extract | Using `entities.detect.scan` |
+| `web_server_identifier` | extract | Naming software (and version) from HTTP headers; `cookie_extractor` and `web_framework_identifier` are its siblings |
+| `binary_strings` | extract | Re-emitting `raw_content` so the pipeline re-scans recovered text (the `strings(1)` pattern) |
+| `dns_bruteforce` | lookup (active) | `ctx.check_authorized` gate, wildcard-DNS detection, config-driven wordlist |
+| `dns_axfr` | lookup (active) | Zone transfer with the socket call isolated (`asyncio.to_thread`) and the zone parsing pure |
+| `port_scanner` | lookup (active) | Bounded async TCP connect scan, `asyncio.open_connection` mocked in tests |
+| `subdomain_takeover` | lookup (internal) | DNS + third-party fingerprint match; a passive check that still produces a `vulnerability` |
 
 ## Retired upstreams
 

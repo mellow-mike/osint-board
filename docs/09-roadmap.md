@@ -55,8 +55,13 @@ sandboxed with output parsed into entities; passive-only mode provably refuses t
 server and framework identifiers, the cookie extractor, the error-string extractor, the company- and
 human-name extractors, the base64 decoder and the binary-string extractor — all pure, offline and wired into
 `ExtractorPipeline` (the base64 decoder and `binary_strings` re-feed their recovered text so the other
-extractors run over it). Active internals (DNS brute force, zone transfer, port scanner, subdomain-takeover),
-the remaining internal lookups and the 13 external tools are next.
+extractors run over it). The four active internal recon modules are now implemented and gated: `dns_bruteforce`
+(wildcard-aware subdomain brute force), `dns_axfr` (zone transfer), `port_scanner` (TCP connect scan) and
+`subdomain_takeover` (dangling-CNAME check, itself passive). The first three go through `ctx.check_authorized`,
+which now honours `OSINT_PASSIVE_ONLY`: while it is on (the default) they are refused unless the investigation
+scope names the target; the catalog's `requires_authorization` was corrected so DNS brute force and zone
+transfer are gated as the security policy always specified. The remaining internal lookups (`ssl_analyzer`,
+`page_info`, `similar_domains`, `file_metadata` …) and the 13 external tools are next.
 
 ### The 24-hour soak is a soft gate
 

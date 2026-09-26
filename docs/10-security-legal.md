@@ -8,10 +8,13 @@ own compliance.
 
 - `OSINT_PASSIVE_ONLY=true` is the default. Modules marked `requires_authorization: true` in the catalog
   (port scanner, nmap, nuclei, nbtscan, onesixtyone, snallygaster, DNS brute force, zone transfer) are refused
-  unless the investigation's scope allows them.
+  unless the investigation's scope allows them. Setting `OSINT_PASSIVE_ONLY=false` opts the whole instance into
+  active scanning and lifts this gate for every active module, so leave it on unless the deployment is dedicated
+  to authorised active work.
 - Authorisation is per investigation: `Scope(allow_active=True, targets=[...])` lists the domains and CIDRs the
-  operator has permission to probe. `ModuleContext.check_authorized` enforces it; a blocked run is recorded as
-  `refused` in `module_runs`, never silently dropped.
+  operator has permission to probe. `ModuleContext.check_authorized` enforces it (and each active module also
+  self-checks at the top of `lookup`, so a direct/CLI run is gated too); a blocked run is recorded as `refused`
+  in `module_runs`, never silently dropped.
 - The `tools` worker (which holds the active scanners) is a separate, opt-in deployment. In Kubernetes it needs
   `NET_RAW` and should run on an isolated node pool with a published abuse contact.
 
