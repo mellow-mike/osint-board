@@ -51,7 +51,12 @@ snallygaster); file-metadata and document extractors.
 milestone (soft gate, below); an authorised-scope investigation can run active recon end to end; tools run
 sandboxed with output parsed into entities; passive-only mode provably refuses them.
 *Status:* in progress — live aircraft (`opensky` via `adsb_network`) and the soak harness are done; the first
-24 h soak was started with them. Active internals and tools are next.
+24 h soak was started with them. The document/content extractors are now implemented and tested: the web
+server and framework identifiers, the cookie extractor, the error-string extractor, the company- and
+human-name extractors, the base64 decoder and the binary-string extractor — all pure, offline and wired into
+`ExtractorPipeline` (the base64 decoder and `binary_strings` re-feed their recovered text so the other
+extractors run over it). Active internals (DNS brute force, zone transfer, port scanner, subdomain-takeover),
+the remaining internal lookups and the 13 external tools are next.
 
 ### The 24-hour soak is a soft gate
 
