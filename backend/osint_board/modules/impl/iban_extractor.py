@@ -1,6 +1,6 @@
 """IBAN extractor (ISO 7064 mod 97-10 validated).
 
-Catalog: iban_extractor · internal · extract · access=local · phase 1
+Catalog: iban_extractor · internal · extract · access=local · phase 2 (pulled forward into phase 1)
 """
 
 from __future__ import annotations

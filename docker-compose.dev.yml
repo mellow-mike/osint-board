@@ -1,0 +1,9 @@
+# Local-development overlay: publishes Redis on the loopback interface so a backend run from a checkout
+# (`make api` / `make feeds`, the soak's `scripts/soak.sh --infra`) can reach it. Not for shared hosts: Redis has
+# no password and the arq worker unpickles jobs from it.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d db redis meilisearch   # = make infra
+services:
+  redis:
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"

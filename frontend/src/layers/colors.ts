@@ -59,11 +59,62 @@ export function categoricalColor(baseHex: string, key: string): string {
   return rgbToHex(hslToRgb((h + shift + 1) % 1, Math.max(0.45, s), lum));
 }
 
-/** Sequential: dim → base → bright as t goes 0 → 1. */
+/** Sequential: dim → base → bright as t goes 0 → 1 (lightness tops out at 0.9, so the high end never turns white). */
 export function sequentialColor(baseHex: string, t: number): string {
   const [h, s, l] = rgbToHsl(hexToRgb(baseHex));
   const tt = Math.max(0, Math.min(1, t));
-  return rgbToHex(hslToRgb(h, s, 0.25 + tt * Math.max(0.2, l + 0.35 - 0.25)));
+  const top = Math.min(0.9, Math.max(0.45, l + 0.35));
+  return rgbToHex(hslToRgb(h, s, 0.25 + tt * (top - 0.25)));
+}
+
+/** Aircraft on the ground: a muted tan that sits off the airborne ramp. */
+export const GROUND_COLOR = '#b08968';
+/** Altitude not reported: neutral grey, so it never reads as some flight level. */
+export const UNKNOWN_ALTITUDE_COLOR = '#9ca3af';
+
+/**
+ * Multi-hue altitude ramp in metres (after tar1090's colours by altitude): red-orange near the ground through
+ * yellow, green and cyan to blue and magenta at cruise levels. Lightness is lifted in the blues so they stay visible
+ * on dark imagery. Stops: [metres, hue°, lightness].
+ */
+export const ALTITUDE_STOPS: readonly (readonly [number, number, number])[] = [
+  [0, 20, 0.55],
+  [610, 32, 0.55],
+  [1220, 43, 0.53],
+  [1830, 54, 0.52],
+  [2440, 72, 0.5],
+  [2740, 85, 0.5],
+  [3350, 140, 0.5],
+  [6000, 190, 0.52],
+  [9000, 235, 0.64],
+  [12190, 300, 0.62],
+  [13000, 315, 0.62],
+];
+
+const ALTITUDE_BIN_M = 25;
+const altitudeCache = new Map<number, string>();
+
+/** Ramp colour for an altitude in metres (quantised to 25 m and memoised; clamped to the ramp's ends). */
+export function altitudeColor(m: number): string {
+  const bin = Math.round(Math.max(0, Math.min(13_000, m)) / ALTITUDE_BIN_M);
+  const hit = altitudeCache.get(bin);
+  if (hit) return hit;
+  const alt = bin * ALTITUDE_BIN_M;
+  let i = 1;
+  while (i < ALTITUDE_STOPS.length - 1 && ALTITUDE_STOPS[i]![0] < alt) i++;
+  const [m0, h0, l0] = ALTITUDE_STOPS[i - 1]!;
+  const [m1, h1, l1] = ALTITUDE_STOPS[i]!;
+  const t = Math.max(0, Math.min(1, (alt - m0) / (m1 - m0 || 1)));
+  const out = rgbToHex(hslToRgb((h0 + (h1 - h0) * t) / 360, 0.85, l0 + (l1 - l0) * t));
+  altitudeCache.set(bin, out);
+  return out;
+}
+
+/** Aircraft colour: ground and unknown altitude are distinct from every airborne level. */
+export function aircraftAltitudeColor(altitudeM: unknown, onGround: boolean): string {
+  if (onGround) return GROUND_COLOR;
+  const m = typeof altitudeM === 'number' ? altitudeM : typeof altitudeM === 'string' && altitudeM !== '' ? Number(altitudeM) : NaN;
+  return Number.isFinite(m) ? altitudeColor(m) : UNKNOWN_ALTITUDE_COLOR;
 }
 
 /** Diverging: cold blue (t=0) → neutral (0.5) → warm red (1). */
@@ -89,11 +140,19 @@ const DEFAULT_DOMAINS: Record<string, [number, number]> = {
   wind_speed: [0, 30],
 };
 
-export function colorFor(rule: ColorRule, props: Record<string, unknown>): string {
-  const raw = props[rule.attribute];
+/**
+ * CSS colour of a feature under `rule`. `fallback` stands in for a missing attribute (absolute-altitude layers pass
+ * the feature's own height for `altitude_m`); `altitude_m` always uses the altitude ramp with its ground and unknown
+ * colours; anything else missing or non-numeric gets the layer's base colour.
+ */
+export function colorFor(rule: ColorRule, props: Record<string, unknown>, fallback?: unknown): string {
+  const raw = props[rule.attribute] !== undefined ? props[rule.attribute] : fallback;
+  if (rule.attribute === 'altitude_m') return aircraftAltitudeColor(raw, props['on_ground'] === true);
   if (raw === undefined || raw === null) return rule.base;
   if (rule.scale === 'categorical') return categoricalColor(rule.base, String(raw));
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return rule.base;
   const [lo, hi] = rule.domain ?? DEFAULT_DOMAINS[rule.attribute] ?? [0, 1];
-  const t = (Number(raw) - lo) / (hi - lo || 1);
+  const t = (n - lo) / (hi - lo || 1);
   return rule.scale === 'sequential' ? sequentialColor(rule.base, t) : divergingColor(t);
 }

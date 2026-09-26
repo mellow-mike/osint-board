@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from osint_board import __version__
 from osint_board.api.routes import catalog, health, investigations, layers, modules, search, stream
@@ -34,6 +35,8 @@ def create_app(settings: Settings | None = None, *, use_memory_index: bool = Fal
         docs_url="/api/docs",
         openapi_url="/api/openapi.json",
     )
+    # Layer snapshots are tens of thousands of GeoJSON features; they compress ~10x. Level 5 keeps CPU modest.
+    app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,

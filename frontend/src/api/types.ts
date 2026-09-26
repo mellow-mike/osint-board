@@ -108,16 +108,43 @@ export interface Health {
   services: Record<string, string>;
 }
 
-/** Delta pushed over /api/stream for live layers. */
+/**
+ * One live item for a layer (backend/osint_board/feeds/db_sink.py). `props` carries the item's scalar meta plus
+ * `precision`, `geo_source` and `entity_type`; it is a partial update, merged over what the client already has.
+ */
 export interface LiveDelta {
   t: 'track' | 'event';
   id: string;
   lon: number;
   lat: number;
+  /** metres above the WGS84 ellipsoid; null when unknown or on the ground */
   alt: number | null;
+  /** track/heading in degrees (tracks only) */
   hdg?: number | null;
+  /** ground speed in the layer's unit, knots for vessels and aircraft (tracks only) */
   spd?: number | null;
+  /** ISO time of the position fix / observation */
   ts: string;
   name?: string;
   props?: Record<string, unknown>;
 }
+
+/**
+ * Frames on /api/stream (backend/osint_board/api/routes/stream.py). The sink publishes one `batch` per write and
+ * layer; a legacy single delta is a `LiveDelta` with a `layer`; `{type: 'error'}` precedes a server-side close.
+ */
+export interface LiveBatchFrame {
+  t: 'batch';
+  layer: string;
+  items: LiveDelta[];
+}
+
+export type LiveDeltaFrame = LiveDelta & { layer: string };
+
+export interface StreamErrorFrame {
+  type: 'error';
+  message: string;
+}
+
+/** Client-side stream status: `connecting` until the socket proves itself, `down` after the server reported an error. */
+export type StreamState = { state: 'connecting' } | { state: 'live' } | { state: 'down'; message: string };

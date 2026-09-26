@@ -22,10 +22,40 @@ from osint_board.config import Settings, get_settings
 from osint_board.logging import get_logger
 from osint_board.modules.http import HttpClient
 from osint_board.modules.types import Content, Emit, EntityRef
+from osint_board.redaction import register_secret
 
 
 class AuthorizationError(PermissionError):
     """Raised when an active module is invoked outside an authorised scope."""
+
+
+class MissingSecret(RuntimeError):
+    """A module needs a credential that is not configured (``OSINT_MODULE_<ID>_<NAME>``).
+
+    Raised by :meth:`ModuleContext.require_secret`. It is a configuration state, not a failure: the feed runner
+    disables the feed once (``feed.disabled reason=missing_secret``) instead of retrying it for ever.
+    """
+
+    def __init__(self, module_id: str, name: str = "API_KEY") -> None:
+        self.module_id = module_id
+        self.name = name.upper()
+        self.env_var = f"OSINT_MODULE_{module_id.upper()}_{self.name}"
+        super().__init__(f"module {module_id} needs {self.env_var} (see .env.example)")
+
+    def __reduce__(self) -> tuple[Any, ...]:  # keep it picklable (arq ships job errors between processes)
+        return type(self), (self.module_id, self.name)
+
+
+class RetryLater(RuntimeError):
+    """An upstream asked us not to come back before ``retry_after`` seconds (a repeat-download block, an exhausted
+    credit budget). The feed runner waits at least that long before the next poll instead of its usual backoff."""
+
+    def __init__(self, message: str, retry_after: float) -> None:
+        self.retry_after = float(retry_after)
+        super().__init__(message)
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return type(self), (str(self), self.retry_after)
 
 
 @dataclass(slots=True)
@@ -70,14 +100,20 @@ class ModuleContext:
         self.http = HttpClient(self.settings, self.spec.id, rate_per_sec=self.rate_per_sec)
 
     def secret(self, name: str = "API_KEY") -> str | None:
-        return self.config.get(name.lower()) or self.settings.module_secret(self.spec.id, name)
+        """``config[name.lower()]``, else ``OSINT_MODULE_<ID>_<NAME>`` from the environment or `.env`.
+
+        Every value handed out is registered with :func:`osint_board.redaction.register_secret`, so it is masked
+        in logs and error reports wherever it came from.
+        """
+        value = self.config.get(name.lower()) or self.settings.module_secret(self.spec.id, name)
+        if isinstance(value, str):
+            register_secret(value)
+        return value
 
     def require_secret(self, name: str = "API_KEY") -> str:
         value = self.secret(name)
         if not value:
-            raise RuntimeError(
-                f"module {self.spec.id} needs OSINT_MODULE_{self.spec.id.upper()}_{name.upper()} (see .env.example)"
-            )
+            raise MissingSecret(self.spec.id, name)
         return value
 
     def check_authorized(self, target: EntityRef) -> None:

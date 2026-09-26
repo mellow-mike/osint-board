@@ -6,11 +6,11 @@
 |---|---|---|
 | **Web client** | static files (nginx) | Cesium globe, layer panel, search, inspector. Talks only to `/api`. |
 | **API** | `osint-board api` (uvicorn) | Catalog, search, layer features/tiles, module runs, investigations, WebSocket stream. |
-| **Feed runner** | `osint-board feeds` (singleton) | Polls/streams every implemented feed module on its cadence, writes geo tables, publishes deltas. |
+| **Feed runner** | `osint-board feeds` (singleton) | Polls/streams every implemented feed module on its cadence, writes geo tables, publishes deltas. `osint-board soak run` runs the same runner for 24 h under a journaling harness (the soak, a soft gate after every milestone). |
 | **Workers** | `osint-board worker [--queue tools]` | Executes lookup modules on demand (arq/Redis). The `tools` queue runs in the tools image with nmap, nuclei and similar. |
 | **PostgreSQL 16** | container / managed | PostGIS (geometry, tiles), TimescaleDB (event and position hypertables), pg_trgm (fuzzy fallback). |
 | **Meilisearch** | container / managed | Typo-tolerant, faceted, geo-aware entity index behind the search box. |
-| **Redis** | container / managed | Job queues, live-position cache, pub/sub of layer deltas, rate-limit state. |
+| **Redis** | container / managed | Job queues and pub/sub of layer deltas (a live-position cache is planned; rate limits are per process today). |
 | **Optional** | compose profiles | Tools image; SearXNG (meta search); Photon (geocoder); Tor proxy. |
 
 All backend processes are the same Python package and image (`backend/`), selected by the CLI subcommand.
@@ -48,7 +48,7 @@ flowchart TB
 ## Request lifecycles
 
 **Search.** `GET /api/search?q=` runs `parse_query` (typed detections, filters) then a parallel fan-out: exact
-lookups per detection, a Meilisearch fuzzy query, and a live-track lookup for MMSI/ICAO24/NORAD. Results merge
+lookups per detection, a Meilisearch fuzzy query, and (planned) a live-track lookup for MMSI/ICAO24/NORAD. Results merge
 (exact first) and gain suggestions (fly-to, pivot, modules that consume the detected type). Target p95 under
 100 ms warm.
 
@@ -78,6 +78,7 @@ Tiled layers (cell towers, Wi-Fi) use `/api/layers/{id}/tiles/{z}/{x}/{y}.mvt` b
 | Python module framework | The OSINT ecosystem (dnspython, phonenumbers, sgp4, exiftool bindings, scanners) is Python-first; async keeps throughput high. | [0004](adr/0004-python-module-framework.md) |
 | Monorepo, one backend image | Feeds, workers and API share models and the catalog; one build, one version. | [0005](adr/0005-monorepo-layout.md) |
 | Catalog as source of truth | 239 modules cannot be kept consistent by hand across code, docs and UI. | [0006](adr/0006-catalog-as-source-of-truth.md) |
+| Keyless aircraft, soft soak gate | The aviation layer needed a free source; a 24 h soak cannot block every change. | [0007](adr/0007-keyless-aircraft-and-soft-soak-gate.md) |
 
 ## Source layout
 
@@ -86,14 +87,16 @@ backend/osint_board/
   api/          FastAPI app, routes (health, catalog, search, layers, modules, investigations, stream), state
   catalog/      pydantic models + loader for catalog/*.yaml
   entities/     EntityType enum, normalisation, detection (classify / scan)
-  modules/      base classes, registry (@module), http client, impl/<id>.py implementations
-  feeds/        FeedRunner, MemorySink, DbSink
+  modules/      base classes, registry (@module), http client, impl/<id>.py implementations, and in-process
+                seeds of internal services (lists.py → threat_lists, adsb.py → adsb_network)
+  feeds/        FeedRunner, MemorySink, DbSink, state.py (persisted cadence), soak.py + soak_report.py (24 h soak)
+  redaction.py  masks secrets in logs, errors and soak reports
   worker/       arq tasks, EntityStore
   search/       parser, index (Meilisearch / in-memory), service
   geo/          WGS84 maths, precision, SGP4 propagation, GeoResolver, country centroids
   db/           SQLAlchemy models, engine; migrations/ (Alembic, raw SQL DDL)
 frontend/src/
-  globe/        viewer (no-ion Cesium), scaling, renderers (points, halos, orbits), useLayerRendering
+  globe/        viewer (no-ion Cesium), scaling, renderers (points, halos, orbits), useLayerRendering, liveCache
   layers/       generated.ts (from catalog), registry, colour rules
   search/       SearchBar (Cmd/Ctrl-K)
   panels/       LayerPanel, InspectorPanel, StatusBar

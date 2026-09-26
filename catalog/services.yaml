@@ -243,14 +243,35 @@ services:
   - id: adsb_network
     name: ADS-B aggregation
     summary: Aircraft positions from community aggregators and own receivers, replacing OpenSky's rate-limited API.
-    data_sources: [adsb.lol, adsb.fi, airplanes.live, ADSB.one (community, free, no key), OpenSky anonymous/registered, own RTL-SDR feeders (readsb + tar1090 → our ingest)]
-    method: Merge by ICAO24 with source preference and timestamp; MLAT-derived positions flagged; military/blocked hex handling per feed policy.
-    freshness: 1–5 seconds.
-    density: Global where community coverage exists; own receivers fill gaps.
-    exceeds_by: Update rate and no credit budget.
+    data_sources:
+      - adsb.lol point API (no key today, a feeder key is announced for later; ODbL 1.0)
+      - adsb.fi open data v3 point API (no key; 1 req/s documented; personal/non-commercial use, attribution required)
+      - Own receivers — readsb / dump1090-fa / tar1090 aircraft.json (config receivers)
+      - OpenSky /states/all — optional, off by default (anonymous 400 or OAuth2 client 4,000 credits/day; its terms appear to require a licence for operational use)
+      - airplanes.live and ADSB.one — now refuse unauthenticated clients (HTTP 403); need an arrangement, not polled
+      - Feeder-only bulk endpoints (adsb.fi /v2/snapshot, adsb.lol re-api) — need our own feeder's IP; not polled yet
+    method: >-
+      Seeded in-process by the opensky feed (backend/osint_board/modules/adsb.py). The globe is tiled with 1,332 250 nm
+      query circles (29 latitude bands, every point within 0.97 R of a centre). Tiles are hot (>= 10 aircraft, polled
+      every 2 min), warm (1-9, every 15 min) or cold (0, every 3 h), with hysteresis; unknown tiles are swept outward
+      from the busiest regions first. Each 5 s round asks each aggregator for ceil(rate x 5 s) of the most overdue tiles
+      through its own token bucket (0.5 req/s by default) and circuit breaker (backoff to 10 min; 401/403 blocks it for
+      1 h). Receivers are read every round; OpenSky, when enabled, adds a global snapshot paced by its credit budget
+      that also promotes tiles. Merge per ICAO24: newest position wins; within 1 s the better position source (ADS-B >
+      ADS-R > ADS-C > TIS-B > MLAT) then receiver > aggregator > OpenSky; static fields are filled from any source.
+      MLAT/TIS-B positions are street precision. Database flags (military/interesting/PIA/LADD) drive the
+      exclude_flags policy.
+    freshness: >-
+      Per tile, not global: busy airspace every 2-5 min, quiet regions every 15 min to 3 h; the first world sweep after a
+      start takes ~40 min. Own receivers every round (~10 s). OpenSky, when enabled, every 86 s (registered) or 14.4 min
+      (anonymous).
+    density: >-
+      Global where community coverage exists (about 8,000 aircraft with a position at a time, ~80 % of them inside ~55
+      of the tiles); own receivers fill gaps. Oceans and polar regions are mostly empty.
+    exceeds_by: No key or credit budget; merges several networks (each adds ~10 % aircraft the other lacks).
     effort: M
     depends_on: []
-    phase: 3
+    phase: 2
 
   - id: weather_service
     name: Weather & ocean observations

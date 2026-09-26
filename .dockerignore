@@ -9,3 +9,4 @@
 *.mmdb
 .env
 frontend/.vite
+data/

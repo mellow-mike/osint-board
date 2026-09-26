@@ -74,9 +74,16 @@ layers/services referenced exist, feeds have cadences, paid modules name a repla
 - `ModuleContext.check_authorized(target)` raises unless `scope.allow_active` and the target is inside
   `scope.targets` (domains or CIDRs). Investigations carry the scope; the CLI has `--allow-active`.
 - `HttpClient` applies a token bucket per module (`rate_per_sec`), retries on 429/5xx with backoff, honours
-  `Retry-After`, sends a stable User-Agent and routes through `OSINT_OUTBOUND_PROXY` when set. Tor-only
-  modules use `OSINT_TOR_SOCKS_PROXY`.
-- Secrets: `ctx.require_secret("API_KEY")` maps to `OSINT_MODULE_<ID>_API_KEY`. Never logged, never stored.
+  `Retry-After` (seconds or HTTP date) and `X-Rate-Limit-Retry-After-Seconds` up to 2 min (a longer ask returns
+  the response to the module instead of sleeping), sends a stable User-Agent and routes through
+  `OSINT_OUTBOUND_PROXY` when set. Tor-only modules use `OSINT_TOR_SOCKS_PROXY`.
+- Secrets: `ctx.require_secret("API_KEY")` maps to `OSINT_MODULE_<ID>_API_KEY` (environment first, then
+  `<repo>/.env` and `./.env`) and raises `MissingSecret` when unset, which disables a feed once instead of
+  failing every poll. Every secret a module reads is masked in logs and errors (`osint_board/redaction.py`); never
+  stored.
+- Options: `OSINT_MODULE_<ID>_CONFIG` (a JSON object) is merged into `ctx.config` for every run of the module.
+- Feeds whose upstream says "not before" raise `RetryLater(message, retry_after)`; the runner waits at least that
+  long before the next poll.
 
 ## Adding a module (walkthrough)
 
@@ -101,7 +108,8 @@ Most free sources are variations on four patterns, so the modules built on them 
 | `dnsutil.py` | `DnsblModule` (zones, answer-code tables, error codes, key-prefixed zones) and `DnsFilterModule` (resolve on an unfiltered reference resolver, then on the filtering one; NXDOMAIN/REFUSED/sinkhole answers become verdicts) plus `query`/`DnsAnswer` | DroneBL, SpamCop, Spamhaus ZEN, SURBL, UCEPROTECT, Project Honey Pot; AdGuard, CleanBrowsing, Cloudflare, DNS for Family, OpenDNS, Quad9, Yandex, Comodo; OpenNIC, DNS raw records |
 | `buckets.py` | `BucketFinderModule`: name permutations of the target probed against a provider endpoint, public listings parsed | S3, Azure Blob, GCS, DigitalOcean Spaces |
 | `rdap.py` | RDAP (RFC 9083) client/parser: `parse_rdap` → `record_emits` (networks, ASNs, contacts, addresses) | ARIN, WHOIS (RDAP first, port 43 fallback) |
-| `http.py` | rate-limited `HttpClient` with `get_json_or_none` (404 → nothing known), `post_json`, `stream_bytes` (multi-GB dumps), and a Tor pool (`tor=True`) | everything |
+| `http.py` | rate-limited `HttpClient` with `get_json_or_none` (404 → nothing known), `post_json`, `stream_bytes` (multi-GB dumps), a Tor pool (`tor=True`) and `retry_after()` | everything |
+| `adsb.py` | the in-process seed of the `adsb_network` service: readsb/OpenSky parsers, merge by ICAO24, the 250 nm world tile grid and adaptive scheduler, per-provider pacing (1 req/s cap, halved on 429) and breakers, OpenSky OAuth2 + credit budget | `opensky` |
 
 Conventions the helpers assume:
 
@@ -126,7 +134,8 @@ nameserver), `run_lookup` and `run_poll` (instantiate a module from the registry
 | `nasa_firms` | feed (poll, 3h) | CSV feeds, required key, per-satellite sources |
 | `gdelt` | feed (poll, 15m) | Zipped TSV export, GDELT precision codes mapped to ours, skip-if-unchanged |
 | `aisstream` | feed (stream) | WebSocket push feed, vessel tracks keyed by MMSI, static data merged into track props |
-| `opencellid` | feed (poll, monthly) | Streamed gzip CSV (`HttpClient.stream_bytes`), static features |
+| `opencellid` | feed (poll, daily) | Streamed gzip CSV (`HttpClient.stream_bytes`), static features, catch-up of missed daily diffs |
+| `opensky` | feed (poll, 5s rounds) | A tiered module answering keyless through its replacement service (`adsb_network`), multi-source merge, per-provider politeness |
 | `tor_exit_nodes` | lookup + feed | One class serving both an IP lookup and the hourly `tor` layer poll |
 | `abuse_ch` | lookup | Open bulk lists without a key, keyed API on top |
 | `crt_sh` | lookup | Domain to hostnames + certificates with relations to the target |

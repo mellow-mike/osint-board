@@ -6,6 +6,8 @@ export interface RenderFeature {
   alt: number | null;
   name: string;
   props: Record<string, unknown>;
+  /** Epoch ms of the position fix / observation (`props.time`), when known: orders live updates and ages them out. */
+  ts?: number;
 }
 
 export interface LayerRenderer {

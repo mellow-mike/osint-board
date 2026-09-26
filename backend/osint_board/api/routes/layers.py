@@ -1,4 +1,8 @@
-"""Globe data endpoints: GeoJSON features per layer and vector tiles for tiled layers."""
+"""Globe data endpoints: GeoJSON features per layer and vector tiles for tiled layers.
+
+A layer's catalog ``max_age`` bounds what is served: live tracks older than it (by last position time) and static
+rows not refreshed within it (by ``updated_at``) are stale and never returned, whatever ``since`` asks for.
+"""
 
 from __future__ import annotations
 
@@ -11,27 +15,35 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from osint_board.api.deps import get_session, get_state
 from osint_board.api.state import AppState
+from osint_board.catalog import LayerSpec
 from osint_board.schemas import FeatureCollection
 
 router = APIRouter(prefix="/layers", tags=["layers"])
+
+#: GDELT stamps each 15-minute export, and every event's DATEADDED in it, with the *end* of the window and publishes
+#: it before that time, so the newest news is up to ~15 min "in the future"; without this slack it stays hidden.
+EVENT_CLOCK_SLACK = timedelta(minutes=30)
+
+# Optional parameters are CAST where they are tested for NULL: asyncpg prepares the statement and Postgres cannot
+# infer a type for a bare ``$n IS NULL`` (every query would fail with IndeterminateDatatypeError).
 
 _EVENTS_SQL = text(
     """
     SELECT key, name, entity_type, ST_X(geom) AS lon, ST_Y(geom) AS lat, alt_m, props, time, source_module
     FROM geo_events
     WHERE layer = :layer AND time >= :since AND time <= :until
-      AND (:bbox IS NULL OR geom && ST_MakeEnvelope(:minx, :miny, :maxx, :maxy, 4326))
+      AND (CAST(:bbox AS text) IS NULL OR geom && ST_MakeEnvelope(:minx, :miny, :maxx, :maxy, 4326))
     ORDER BY time DESC
     LIMIT :limit
     """
 )
 _TRACKS_SQL = text(
     """
-    SELECT id AS key, name, kind AS entity_type, ST_X(last_geom) AS lon, ST_Y(last_geom) AS lat, last_alt_m AS alt_m,
+    SELECT id AS key, name, kind, ST_X(last_geom) AS lon, ST_Y(last_geom) AS lat, last_alt_m AS alt_m,
            props, last_time AS time, heading, speed
     FROM tracks
     WHERE layer = :layer AND last_geom IS NOT NULL AND last_time >= :since
-      AND (:bbox IS NULL OR last_geom && ST_MakeEnvelope(:minx, :miny, :maxx, :maxy, 4326))
+      AND (CAST(:bbox AS text) IS NULL OR last_geom && ST_MakeEnvelope(:minx, :miny, :maxx, :maxy, 4326))
     ORDER BY last_time DESC
     LIMIT :limit
     """
@@ -40,8 +52,8 @@ _STATIC_SQL = text(
     """
     SELECT key, props->>'name' AS name, ST_X(geom) AS lon, ST_Y(geom) AS lat, props, updated_at AS time
     FROM static_features
-    WHERE layer = :layer
-      AND (:bbox IS NULL OR geom && ST_MakeEnvelope(:minx, :miny, :maxx, :maxy, 4326))
+    WHERE layer = :layer AND updated_at >= :since
+      AND (CAST(:bbox AS text) IS NULL OR geom && ST_MakeEnvelope(:minx, :miny, :maxx, :maxy, 4326))
     LIMIT :limit
     """
 )
@@ -54,8 +66,8 @@ _ENTITIES_SQL = text(
            meta AS props, last_seen AS time, geo_precision, geo_source, geo_confidence
     FROM entities
     WHERE geom IS NOT NULL AND type = ANY(:types)
-      AND (:investigation_id IS NULL OR investigation_id = CAST(:investigation_id AS uuid))
-      AND (:bbox IS NULL OR geom && ST_MakeEnvelope(:minx, :miny, :maxx, :maxy, 4326))
+      AND (CAST(:investigation_id AS uuid) IS NULL OR investigation_id = CAST(:investigation_id AS uuid))
+      AND (CAST(:bbox AS text) IS NULL OR geom && ST_MakeEnvelope(:minx, :miny, :maxx, :maxy, 4326))
     ORDER BY last_seen DESC
     LIMIT :limit
     """
@@ -83,9 +95,42 @@ def _parse_bbox(bbox: str | None) -> dict:
     return {"bbox": bbox, "minx": minx, "miny": miny, "maxx": maxx, "maxy": maxy}
 
 
+#: Static rows of layers without a ``max_age`` are served whatever their age.
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
+
+def _window(layer: LayerSpec, since: str | None, now: datetime) -> tuple[datetime, datetime]:
+    """``(since, static_since)`` for a features query: ``since`` bounds event/track times (default 24 h),
+    ``static_since`` bounds static rows' ``updated_at``; both are clamped to the layer's ``max_age``."""
+    from osint_board.search.parser import parse_time
+
+    try:
+        since_dt = parse_time(since, now) if since else now - timedelta(hours=24)
+    except OverflowError:  # a duration longer than datetime can represent (since=99999999999d)
+        since_dt = None
+    if since_dt is None:
+        raise HTTPException(400, "since must be an ISO timestamp or a duration like 30m, 24h, 7d")
+    static_since = _EPOCH
+    if max_age := layer.max_age_seconds:
+        floor = now - timedelta(seconds=max_age)
+        since_dt = max(since_dt, floor)
+        static_since = since_dt if since else floor
+    return since_dt, static_since
+
+
 def _feature(row, layer: str) -> dict:  # noqa: ANN001
     props = dict(row.props or {}) if hasattr(row, "props") else {}
-    for k in ("name", "entity_type", "time", "heading", "speed", "geo_precision", "geo_source", "geo_confidence"):
+    for k in (
+        "name",
+        "entity_type",
+        "kind",
+        "time",
+        "heading",
+        "speed",
+        "geo_precision",
+        "geo_source",
+        "geo_confidence",
+    ):
         if hasattr(row, k) and getattr(row, k) is not None:
             v = getattr(row, k)
             props[k] = v.isoformat() if isinstance(v, datetime) else v
@@ -109,14 +154,14 @@ async def features(
     except KeyError as exc:
         raise HTTPException(404, f"unknown layer {layer_id}") from exc
 
-    from osint_board.search.parser import parse_time
-
     now = datetime.now(tz=UTC)
-    since_dt = parse_time(since, now) if since else now - timedelta(hours=24)
-    params = {"layer": layer_id, "since": since_dt, "until": now, "limit": limit, **_parse_bbox(bbox)}
+    since_dt, static_since = _window(layer, since, now)
+    until = now + EVENT_CLOCK_SLACK
+    params = {"layer": layer_id, "since": since_dt, "until": until, "limit": limit, **_parse_bbox(bbox)}
     if layer.tiled and not bbox:  # tens of millions of rows: a global GeoJSON dump is never what the client wants
         raise HTTPException(400, f"layer {layer_id} is tiled; pass bbox= or use /tiles/{{z}}/{{x}}/{{y}}.mvt")
 
+    etype = layer.entity_types[0].value if layer.entity_types else None
     try:
         if layer.id == "space":
             rows = (await session.execute(_SATS_SQL, {"limit": limit})).all()
@@ -141,9 +186,10 @@ async def features(
         elif layer.group == "live":
             rows = (await session.execute(_TRACKS_SQL, params)).all()
             feats = [_feature(r, layer_id) for r in rows]
+            for f in feats:  # the sink stores the entity type in props; rows written before it did get the layer's
+                f["properties"].setdefault("entity_type", etype)
         elif layer.group == "static":  # feeds upsert these into static_features (feeds/db_sink.py)
-            rows = (await session.execute(_STATIC_SQL, params)).all()
-            etype = layer.entity_types[0].value if layer.entity_types else None
+            rows = (await session.execute(_STATIC_SQL, {**params, "since": static_since})).all()
             feats = [_feature(r, layer_id) for r in rows]
             for f in feats:
                 f["properties"].setdefault("entity_type", etype)

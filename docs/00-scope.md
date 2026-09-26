@@ -43,22 +43,27 @@ what was typed turns any identifier into a pivot within a few hundred millisecon
 - **Free before paid, internal before external.** Paid APIs are optional accelerators, never dependencies.
 - **Safe by default.** Passive-only unless an investigation scope explicitly authorises active probing.
 
-## Success criteria for the first release (end of phase 1)
+## Success criteria for the first release
+
+Phase 1 met these except live aircraft and the 24-hour survival check, which moved to phase 2 and opened it
+(see [09-roadmap.md](09-roadmap.md)):
 
 - Globe shows live vessels, aircraft, satellites, fires, earthquakes, news events, cell towers and Tor relays
   from free sources, with toggles, colour legends and a time window.
 - Search resolves any supported identifier and finds indexed entities in under 100 ms (p95, warm index).
-- 90 or more free-API modules implemented and passing offline tests; every feed survives 24 h unattended.
+- 90 or more free-API modules implemented and passing offline tests.
+- Every feed survives 24 h unattended, shown by the feed soak (`make soak`), which is re-run after every milestone
+  as a soft gate.
 - `docker compose up` on a 4-vCPU / 8 GB machine gives a working system.
 
 ## Inventory (from the CSV)
 
 | Source type | Count | Phase |
 |---|---|---|
-| Free API | 104 | 1 (12 retired upstream become phase-3 replacements) |
+| Free API | 104 | 1 (93); the 11 gone or changed upstream become phase-3 replacements |
 | Internal | 41 | 1 (core) / 2 |
 | Tool | 13 | 2 |
-| Tiered API | 70 | 3 (3 reclassified as free) |
+| Tiered API | 70 | 3 (65); 3 reclassified as phase 1, `adblock_check` and `opensky` in phase 2 |
 | Commercial API | 11 | 4 |
 
 Verified-status breakdown and every per-module note: [modules/CATALOG.md](modules/CATALOG.md).

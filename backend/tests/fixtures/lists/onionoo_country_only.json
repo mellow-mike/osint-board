@@ -1,0 +1,9 @@
+{"version":"8.0",
+"relays_published":"2026-09-25 02:00:00",
+"relays":[
+{"nickname":"BaumiMiddleRelays","fingerprint":"00045153816F644E78AD61BD2EDEFC7DA28587A4","or_addresses":["198.51.100.20:9001"],"last_seen":"2026-09-25 02:00:00","running":true,"flags":["Fast","Running","Stable","Valid"],"country":"de","as":"AS3209"},
+{"nickname":"luexit","fingerprint":"0008D9640FE4947F73E355F67E20C2D290BBC72C","or_addresses":["203.0.113.9:443"],"exit_addresses":["203.0.113.9"],"last_seen":"2026-09-25 02:00:00","running":true,"flags":["Exit","Fast","Running","Valid"],"country":"lu","as":"AS62744"},
+{"nickname":"nowhere","fingerprint":"000A10D43011EA4928A35F610405F92B4433B4DC","or_addresses":["192.0.2.33:9001"],"last_seen":"2026-09-25 02:00:00","running":true,"flags":["Running","Valid"],"as":"AS7018"}
+],
+"bridges_published":"2026-09-25 01:45:21",
+"bridges":[]}

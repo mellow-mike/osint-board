@@ -6,11 +6,12 @@ live vessel and aircraft tracking — is modelled in one catalog, wired through 
 everything with a location lands on the globe in the right place, at the right precision, with layer toggles
 and colour coding. A fast, type-aware search box is the entry point to every investigation.
 
-> Status: **phase 1 in progress**. The architecture, catalog, documentation, deployment files and the core code
-> paths are in place and tested; every free API in the catalog that still exists is wired up, and all 109
-> phase-1 modules are implemented (112 modules with offline fixture tests, including the AIS, GDELT, OpenCellID
-> and Tor feeds and a polite web spider whose pages feed the extractors). The remaining internal and tiered
-> replacements follow the phases described in [docs/09-roadmap.md](docs/09-roadmap.md).
+> Status: **phase 1 done, phase 2 in progress**. Every free API in the catalog that still exists is wired up and
+> all 109 phase-1 modules are implemented. Phase 2 opened with the two items phase 1 left open: **live aircraft
+> with no key** (the `opensky` module answering through the in-process `adsb_network` service from the adsb.lol
+> and adsb.fi community aggregators) and a **24-hour feed soak** (`make soak`, a soft gate run after every
+> milestone). 113 modules are implemented with offline fixture tests. The remaining internal modules, external
+> tools and tiered replacements follow [docs/09-roadmap.md](docs/09-roadmap.md).
 
 ## What it does
 
@@ -20,7 +21,7 @@ and colour coding. A fast, type-aware search box is the entry point to every inv
 | **Layers** | 18 layers (maritime, aviation, space, fires, seismic, conflict, news, weather, cell towers, Wi-Fi, Tor, cloud regions, infrastructure, threat, social, corporate, media, investigation), each with a base colour and an attribute-driven colour scale. Low-precision placements render as uncertainty halos, never pins. |
 | **Modules** | One catalog (`catalog/modules.yaml`) describes all 239 sources: what they consume/produce, whether they emit geo data, their verified access model, and — for every tiered/commercial API — the internal service that replaces it. |
 | **Search** | A parser classifies what you typed (IP, CIDR, domain, e-mail, hash, BTC/ETH, IBAN, LEI, phone, MMSI, ICAO24, NORAD, coordinates, CVE, BSSID and more) with checksum validation, understands filters, fans out to exact plus typo-tolerant plus live-track lookups, and suggests the next pivot or module to run. |
-| **Free first, internal second** | Phase 1 wires the 104 free APIs; phases 3–4 replace the 81 tiered/commercial APIs with 24 internal services designed to match or exceed them on quality and freshness (see [docs/07-internal-replacements.md](docs/07-internal-replacements.md)). |
+| **Free first, internal second** | Phase 1 wires the 93 free APIs that still exist; the 81 tiered/commercial APIs are replaced by internal services (26 in `catalog/services.yaml`) designed to match or exceed them — `adsb_network` already serves live aircraft keylessly; the rest follow in phases 3–4 (see [docs/07-internal-replacements.md](docs/07-internal-replacements.md)). |
 | **Deploy anywhere** | `docker compose up` for self-hosting; a Helm chart for Kubernetes with managed Postgres/Redis/Meilisearch. |
 
 ## Architecture at a glance
@@ -43,7 +44,7 @@ Details: [docs/01-architecture.md](docs/01-architecture.md).
 ## Quick start
 
 ```bash
-cp .env.example .env                      # add any free API keys you have (everything runs without them)
+cp .env.example .env                      # optional: add any free API keys you have (everything runs without them)
 docker compose up -d --build              # db, redis, meilisearch, api, worker, feeds, web
 open http://localhost:8080                # globe; API docs at http://localhost:8000/api/docs
 ```
@@ -51,12 +52,13 @@ open http://localhost:8080                # globe; API docs at http://localhost:
 Local development:
 
 ```bash
-make infra                 # postgres + redis + meilisearch in docker
+make infra                 # postgres + redis + meilisearch in docker (Redis published on 127.0.0.1 for dev)
 make backend-install       # uv sync (Python 3.11+)
 make migrate api           # API on :8000 with reload
 make frontend-install frontend-dev        # Vite on :5173, proxies /api
-make feeds                 # start the free geo feeds (USGS works with no key at all)
-make check                 # everything CI runs
+make feeds                 # start the free geo feeds (quakes, news, satellites, Tor and aircraft need no key)
+make check                 # everything CI runs (lint, tests, catalog, frontend lint/build/test)
+make soak                  # 24 h feed soak on an isolated db/redis; report in data/soak/<run>/report.md
 ```
 
 ## Repository layout
@@ -80,10 +82,10 @@ Start at [docs/README.md](docs/README.md). The generated per-module reference is
 
 | Type | Count | Plan |
 |---|---|---|
-| Free API | 104 | Phase 1 — wire directly (12 are retired upstream and fold into internal services) |
+| Free API | 104 | Phase 1 — wire directly (93); the 11 that are gone or changed upstream fold into internal services in phase 3 |
 | Internal | 41 | Phases 1–2 — build in-process |
 | Tool | 13 | Phase 2 — run in the `tools` worker image |
-| Tiered API | 70 | Phase 3 — internal replacement services |
+| Tiered API | 70 | Phase 3 — internal replacement services (65); 3 reclassified to phase 1, `adblock_check` and `opensky` (live aircraft via `adsb_network`) in phase 2 |
 | Commercial API | 11 | Phase 4 — internal replacement services |
 
 ## License

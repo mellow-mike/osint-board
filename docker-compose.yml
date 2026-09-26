@@ -1,6 +1,6 @@
 # OSINT Board — self-hosted stack.
 #
-#   cp .env.example .env            # fill in keys you have; everything runs without them
+#   cp .env.example .env            # optional: fill in keys you have; everything runs without them
 #   docker compose up -d            # core: db, redis, meilisearch, api, worker, feeds, web
 #   docker compose --profile tools up -d          # + external tool runner (nmap, nuclei, ...)
 #   docker compose --profile replacements up -d   # + SearXNG (meta search) and Photon (geocoder)
@@ -12,7 +12,9 @@ x-backend: &backend
   build:
     context: .
     dockerfile: deploy/docker/backend.Dockerfile
-  env_file: .env
+  env_file:
+    - path: .env
+      required: false  # every key in it is optional (compose >= 2.24)
   environment:
     OSINT_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-osint}:${POSTGRES_PASSWORD:-osint}@db:5432/${POSTGRES_DB:-osint}
     OSINT_REDIS_URL: redis://redis:6379/0
@@ -48,9 +50,12 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--save", "60", "1", "--appendonly", "no", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru"]
+    # volatile-lru: only keys with a TTL (caches) are evicted, never the arq job queues
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "no", "--maxmemory", "512mb", "--maxmemory-policy", "volatile-lru"]
     volumes:
       - redisdata:/data
+    # no host port here: Redis has no password and arq unpickles jobs from it. docker-compose.dev.yml publishes it
+    # on 127.0.0.1 for `make infra` (a backend run from a checkout) and the soak's isolated stack.
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -124,7 +129,9 @@ services:
     build:
       context: .
       dockerfile: deploy/docker/tools.Dockerfile
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false
     environment:
       OSINT_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-osint}:${POSTGRES_PASSWORD:-osint}@db:5432/${POSTGRES_DB:-osint}
       OSINT_REDIS_URL: redis://redis:6379/0

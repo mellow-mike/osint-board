@@ -1,7 +1,8 @@
 """Tor exit list and Onionoo relay details — a lookup for IPs and an hourly feed for the ``tor`` layer.
 
 Catalog: tor_exit_nodes · free_api · lookup(+feed) · access=open · phase 1
-Relays are geolocated by Onionoo at city precision, so they render as halos.
+Onionoo used to geolocate relays to a city; it now returns only the country, so a relay without coordinates is
+placed at its country centroid at ``country`` precision (a 600 km halo, never a pin).
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from osint_board.entities.types import EntityType
+from osint_board.geo.centroids import COUNTRY_CENTROIDS
 from osint_board.modules.base import FeedModule
 from osint_board.modules.helpers import to_datetime, verdict
 from osint_board.modules.lists import ListLookupModule, ListSource
@@ -35,48 +37,65 @@ def relay_role(flags: list[str]) -> str:
     return "middle"
 
 
-def parse_onionoo(payload: dict[str, Any]) -> list[Emit]:
-    """Onionoo ``details`` document → one ``tor_relay`` per running relay with a city-precision position."""
+def parse_relay(relay: dict[str, Any]) -> Emit | None:
+    """One Onionoo relay → a ``tor_relay`` (``None`` without a fingerprint); raises on malformed fields."""
+    fp = relay.get("fingerprint")
+    if not fp or not isinstance(fp, str):
+        return None
+    lat, lon = relay.get("latitude"), relay.get("longitude")
+    flags = relay.get("flags") or []
+    addresses = [a.rsplit(":", 1)[0].strip("[]") for a in relay.get("or_addresses") or []]
+    geo = None
+    if lat is not None and lon is not None:
+        try:
+            geo = GeoPoint(lat=float(lat), lon=float(lon), precision="city", source="onionoo")
+        except (TypeError, ValueError):
+            geo = None
+    country = relay.get("country")
+    if geo is None and isinstance(country, str) and (centroid := COUNTRY_CENTROIDS.get(country.upper())):
+        geo = GeoPoint(lat=centroid[0], lon=centroid[1], precision="country", source="onionoo country centroid")
+    return Emit(
+        type=EntityType.TOR_RELAY,
+        value=f"{relay.get('nickname') or 'relay'} ({fp[:8]})",
+        key=f"tor:{fp}",
+        layer="tor",
+        geo=geo,
+        observed_at=to_datetime(relay.get("last_seen")),
+        meta={
+            "fingerprint": fp,
+            "nickname": relay.get("nickname"),
+            "addresses": addresses,
+            "exit_addresses": relay.get("exit_addresses") or [],
+            "flags": flags,
+            "relay_role": relay_role(flags),
+            "country": relay.get("country"),
+            "city": relay.get("city_name"),
+            "as": relay.get("as"),
+            "as_name": relay.get("as_name"),
+            "consensus_weight": relay.get("consensus_weight"),
+            "first_seen": relay.get("first_seen"),
+            "last_seen": relay.get("last_seen"),
+            "platform": relay.get("platform"),
+        },
+    )
+
+
+def parse_onionoo(payload: dict[str, Any], *, rejects: list[str] | None = None) -> list[Emit]:
+    """Onionoo ``details`` document → one ``tor_relay`` per running relay with a city-precision position.
+
+    A malformed relay is skipped, never fatal (reason appended to ``rejects`` when given).
+    """
     out: list[Emit] = []
-    for relay in payload.get("relays", []):
-        fp = relay.get("fingerprint")
-        lat, lon = relay.get("latitude"), relay.get("longitude")
-        if not fp:
+    for relay in payload.get("relays") or []:
+        try:
+            emit = parse_relay(relay)
+        except (AttributeError, TypeError, ValueError) as exc:
+            if rejects is not None:
+                fp = relay.get("fingerprint") if isinstance(relay, dict) else None
+                rejects.append(f"{fp}: {type(exc).__name__}: {exc}")
             continue
-        flags = relay.get("flags") or []
-        addresses = [a.rsplit(":", 1)[0].strip("[]") for a in relay.get("or_addresses", [])]
-        geo = None
-        if lat is not None and lon is not None:
-            try:
-                geo = GeoPoint(lat=float(lat), lon=float(lon), precision="city", source="onionoo")
-            except ValueError:
-                geo = None
-        out.append(
-            Emit(
-                type=EntityType.TOR_RELAY,
-                value=f"{relay.get('nickname') or 'relay'} ({fp[:8]})",
-                key=f"tor:{fp}",
-                layer="tor",
-                geo=geo,
-                observed_at=to_datetime(relay.get("last_seen")),
-                meta={
-                    "fingerprint": fp,
-                    "nickname": relay.get("nickname"),
-                    "addresses": addresses,
-                    "exit_addresses": relay.get("exit_addresses") or [],
-                    "flags": flags,
-                    "relay_role": relay_role(flags),
-                    "country": relay.get("country"),
-                    "city": relay.get("city_name"),
-                    "as": relay.get("as"),
-                    "as_name": relay.get("as_name"),
-                    "consensus_weight": relay.get("consensus_weight"),
-                    "first_seen": relay.get("first_seen"),
-                    "last_seen": relay.get("last_seen"),
-                    "platform": relay.get("platform"),
-                },
-            )
-        )
+        if emit is not None:
+            out.append(emit)
     return out
 
 
@@ -125,5 +144,9 @@ class TorExitNodes(ListLookupModule, FeedModule):
 
     async def poll(self) -> AsyncIterator[Emit]:
         payload = await self.ctx.http.get_json(ONIONOO_URL, timeout=120)
-        for e in parse_onionoo(payload):
+        rejects: list[str] = []
+        emits = parse_onionoo(payload, rejects=rejects)
+        if rejects:
+            self.log.warning("tor_exit_nodes.records_skipped", count=len(rejects), sample=rejects[:3])
+        for e in emits:
             yield e

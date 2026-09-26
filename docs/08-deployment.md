@@ -3,14 +3,14 @@
 ## Self-hosting (Docker Compose)
 
 ```bash
-cp .env.example .env         # set POSTGRES_PASSWORD and MEILI_MASTER_KEY for anything beyond a laptop
+cp .env.example .env         # optional on a laptop; set POSTGRES_PASSWORD and MEILI_MASTER_KEY beyond one
 docker compose up -d --build
 ```
 
 | Service | Image | Notes |
 |---|---|---|
 | db | `timescale/timescaledb-ha:pg16` | PostGIS + TimescaleDB; `deploy/docker/initdb` creates extensions |
-| redis | `redis:7-alpine` | LRU cache for live positions; queues are small |
+| redis | `redis:7-alpine` | arq job queues and live-layer pub/sub; `volatile-lru`, so only keys with a TTL are ever evicted (never queued jobs) |
 | meilisearch | `getmeili/meilisearch:v1.12` | master key from `.env` |
 | migrate | backend image | `alembic upgrade head`, runs once |
 | api / worker / feeds | backend image | one image, different CLI subcommand |
@@ -24,7 +24,11 @@ docker compose --profile replacements up -d    # SearXNG (meta_search), Photon (
 ```
 
 Ports are bound to localhost by default (`127.0.0.1:8000`, `:7700`, `:5432`); only the web service is exposed.
-Put a reverse proxy with TLS in front for anything reachable from a network.
+Redis is not published at all: it has no password and the arq worker unpickles jobs from it. For a backend run
+from a checkout, `make infra` adds `docker-compose.dev.yml`, which publishes it on `127.0.0.1:6379`
+(`REDIS_PORT`). Put a reverse proxy with TLS in front for anything reachable from a network.
+
+`.env` is optional (`env_file` is `required: false`, Compose 2.24 or later): every key in `.env.example` is.
 
 ## Configuration
 
@@ -41,9 +45,17 @@ matter most:
 | `OSINT_TOR_SOCKS_PROXY` | socks5h://tor:9050 | onion modules |
 | `OSINT_GEOIP_CITY_DB` | unset | path to a GeoLite2/DB-IP `.mmdb` for the interim geoip provider |
 | `OSINT_MODULE_<ID>_API_KEY` | unset | per-module credentials; ids match `catalog/modules.yaml` |
+| `OSINT_MODULE_<ID>_CONFIG` | unset | per-module options as a JSON object (e.g. `OSINT_MODULE_OPENSKY_CONFIG` for receivers, providers and the LADD/PIA policy; `poll_timeout` / `stream_idle_timeout` for any feed) |
+| `OSINT_MODULE_OPENSKY_CLIENT_ID` / `_CLIENT_SECRET` | unset | optional OpenSky API client (OAuth2 client credentials); read its terms first |
 
-The globe needs no keys. Free-key modules worth adding first are listed in `.env.example` (AISStream, NASA
-FIRMS, OpenCellID, WiGLE, OpenSky, abuse.ch/ThreatFox, GitHub, urlscan, LeakIX).
+Module secrets and config are read from the process environment first, then from `<repo>/.env` and `./.env`, so
+a backend run from a checkout sees the same keys as the containers. Every secret a module uses is masked in logs,
+error messages and soak reports.
+
+The globe needs no keys: quakes, news, satellites, Tor relays and **aircraft** (community ADS-B aggregators, see
+[04-feeds-and-ingestion.md](04-feeds-and-ingestion.md)) all work without one. Free-key modules worth adding first
+are listed in `.env.example` (AISStream, NASA FIRMS, OpenCellID, WiGLE, abuse.ch/ThreatFox, GitHub, urlscan,
+LeakIX); OpenSky is an optional accelerator for aircraft.
 
 ## Cloud (Kubernetes, Helm)
 
@@ -84,5 +96,9 @@ Imagery for the globe in the cloud: either keep the bundled Natural Earth II (no
   PostGIS/TimescaleDB extension creation degrades gracefully if TimescaleDB is absent (tables stay plain).
 - **Backups**: Postgres is the system of record; Meilisearch and Redis are rebuildable. Back up Postgres.
 - **Health**: `/api/health` reports database, search and redis status; feed liveness is in the logs
-  (`feed.poll`, `feed.error`) and in `module_runs` for on-demand runs.
+  (`feed.poll`, `feed.error`, `feed.disabled`, `feed.waiting`, and per-module stats such as `opensky.stats`) and
+  in `module_runs` for on-demand runs. Each feed's last successful poll is in the `feed_state` table.
+- **Feed soak (soft gate)**: after every milestone, run `make soak` (24 h against an isolated Postgres/Redis, report
+  in `data/soak/<run>/report.md`; see [04-feeds-and-ingestion.md](04-feeds-and-ingestion.md#24-hour-feed-soak)).
+  Do not run it on a host whose feeds process is polling the same upstreams.
 - **Upgrades**: pull a new image, `alembic upgrade head`, roll api/worker/web; the feeds singleton restarts.

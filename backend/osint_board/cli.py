@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+from enum import StrEnum
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -16,9 +18,11 @@ app = typer.Typer(help="OSINT Board backend", no_args_is_help=True)
 catalog_app = typer.Typer(help="Catalog commands")
 modules_app = typer.Typer(help="Module commands")
 search_app = typer.Typer(help="Search commands")
+soak_app = typer.Typer(help="24-hour feed soak (scripts/soak.sh keeps it running unattended)", no_args_is_help=True)
 app.add_typer(catalog_app, name="catalog")
 app.add_typer(modules_app, name="modules")
 app.add_typer(search_app, name="search")
+app.add_typer(soak_app, name="soak")
 
 
 @app.callback()
@@ -88,11 +92,82 @@ def feeds(
             return
         from osint_board.api.state import build_state
         from osint_board.feeds.db_sink import DbSink
+        from osint_board.feeds.state import DbStateStore
 
         state = await build_state()
-        await FeedRunner(registry, DbSink(state.redis), only=set(only) if only else None).run_forever()
+        # redis_url lets the sink reconnect when Redis was down at startup (otherwise live deltas stay off)
+        sink = DbSink(state.redis, redis_url=state.settings.redis_url)
+        try:
+            await FeedRunner(registry, sink, only=set(only) if only else None, state_store=DbStateStore()).run_forever()
+        finally:
+            await sink.aclose()
 
     asyncio.run(_main())
+
+
+class SoakSink(StrEnum):
+    db = "db"
+    null = "null"
+
+
+@soak_app.command("run")
+def soak_run(
+    hours: Annotated[float, typer.Option(help="how long to run (a resumed run keeps its original deadline)")] = 24.0,
+    out: Annotated[
+        Path | None,
+        typer.Option(help="run directory (default <repo>/data/soak/<UTC timestamp>); an unfinished run is resumed"),
+    ] = None,
+    only: Annotated[list[str] | None, typer.Option(help="module ids to run (repeatable; default every feed)")] = None,
+    sink: Annotated[
+        SoakSink, typer.Option(help="db: Postgres + Redis like `feeds`; null: check and count emissions only")
+    ] = SoakSink.db,
+    report_every: Annotated[float, typer.Option(min=1.0, help="seconds between IN PROGRESS report rewrites")] = 300.0,
+    sample_every: Annotated[float, typer.Option(min=1.0, help="seconds between process samples")] = 60.0,
+    state_file: Annotated[
+        Path | None,
+        typer.Option(help="each feed's last successful poll (default <out>/../feed_state.json, shared across runs)"),
+    ] = None,
+) -> None:
+    """Run the feeds for --hours, journaling every event and rewriting a report (exit 0 done, 3 interrupted)."""
+    from osint_board.feeds.soak import EXIT_REFUSED, SoakConfig, SoakError, SoakRun, default_out_dir
+
+    if hours <= 0:
+        raise typer.BadParameter("must be more than 0", param_hint="--hours")
+    directory = (out.expanduser() if out else default_out_dir()).absolute()
+    config = SoakConfig(
+        out=directory,
+        hours=hours,
+        only=list(only or []),
+        sink=sink.value,
+        report_every=report_every,
+        sample_every=sample_every,
+        state_file=state_file.expanduser().absolute() if state_file else None,
+    )
+    try:
+        code = asyncio.run(SoakRun(config).run())
+    except SoakError as exc:
+        typer.echo(f"soak: {exc}", err=True)
+        raise typer.Exit(EXIT_REFUSED) from None
+    raise typer.Exit(code)
+
+
+@soak_app.command("report")
+def soak_report(
+    directory: Annotated[Path, typer.Argument(help="a soak run directory (run.json + journal.ndjson)")],
+    final: Annotated[
+        bool, typer.Option("--final", help="mark the report FINAL even though the run never ended cleanly")
+    ] = False,
+) -> None:
+    """Rebuild report.md / report.json of a soak run from its journal."""
+    from osint_board.feeds.soak_report import REPORT_MD, RUN_META, write_report
+
+    directory = directory.expanduser().absolute()
+    if not (directory / RUN_META).is_file():
+        typer.echo(f"soak: {directory} has no {RUN_META} (not a soak run directory)", err=True)
+        raise typer.Exit(2)
+    report = write_report(directory, final=final)
+    status = report["status"] + (f" — {report['end_reason']}" if report.get("end_reason") else "")
+    typer.echo(f"{report['verdict']} ({status}): {directory / REPORT_MD}")
 
 
 @catalog_app.command("validate")

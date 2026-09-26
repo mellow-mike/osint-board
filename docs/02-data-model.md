@@ -41,11 +41,17 @@ stored here; they come from the environment.
 
 **geo_events** (hypertable by `time`, 1-day chunks) — timestamped occurrences: earthquakes, fires, conflict,
 news, weather observations. Key is a stable id from the source (`usgs:<id>`, `firms:<src>:<ts>:<lat,lon>`).
-Upserts on `(time, key)`.
+Upserts on `(time, key)`; a revision replaces the stored row (same key with a new time, or keys the emission lists
+in `meta.supersedes`, such as a quake's other network ids).
 
 **tracks** — latest state of a moving object (`maritime:<MMSI>`, `aviation:<ICAO24>`), with `last_geom`,
-`last_alt_m`, `heading`, `speed`, merged `props`. **track_positions** (hypertable, 6-hour chunks, 30-day
-retention) holds the history.
+`last_alt_m`, `heading`, `speed` (knots for both), merged `props` (including `entity_type`; `kind` is the vessel or
+aircraft class). An older fix never overwrites a newer one. **track_positions** (hypertable, 6-hour chunks,
+compressed after 2 days, 30-day retention) holds the history with only per-fix props (precision, source, on-ground,
+position source); aviation keeps at most one row per aircraft per 30 s.
+
+**feed_state** — each feed's last successful poll (`module_id`, `last_ok`), so a restarted feeds process waits
+until a poll is due instead of re-downloading every source (migration 0002).
 
 **satellites** — NORAD id, name, TLE lines, epoch, object class, group. Positions are derived, never stored.
 

@@ -1,6 +1,6 @@
 """GLEIF — Legal Entity Identifier records: legal name, addresses and registration status (free, no key).
 
-Catalog: gleif · tiered_api (replacement: local_reimpl) · lookup · access=open · phase 3
+Catalog: gleif · tiered_api (replacement: local_reimpl) · lookup · access=open · phase 1
 """
 
 from __future__ import annotations

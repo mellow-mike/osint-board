@@ -16,4 +16,8 @@ export interface LayerSpec {
   tiled: boolean;
   sources: string[];
   description: string;
+  /** Features whose last position/observation is older than this many seconds are stale and dropped; null = keep. */
+  maxAgeS: number | null;
+  /** Credit line the data sources require while the layer is shown (licence terms), if any. */
+  attribution: string | null;
 }

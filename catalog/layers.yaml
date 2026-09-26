@@ -1,6 +1,6 @@
 # Globe layers. Every module `layer` value in modules.yaml must exist here.
-# The frontend layer registry (frontend/src/layers/registry.ts) and the backend
-# layer API (/api/layers) are both generated/validated from this file.
+# frontend/src/layers/generated.ts (read by the hand-written registry.ts) is generated from this file by
+# `scripts/catalog.py docs`, and the backend layer API (/api/layers) validates against it.
 #
 # group:    live (streams) | events (timestamped occurrences) | static (slow-changing reference data)
 #           | investigation (entities from the analyst's active investigations)
@@ -8,6 +8,10 @@
 # update:   stream (WebSocket deltas) | poll:<interval> | static | on_demand
 # color:    base colour (hex). color_by: attribute-driven colour scale within the layer.
 # altitude: clamp (on the ellipsoid surface) | absolute (true height above WGS84 ellipsoid)
+# max_age:  optional duration (90s, 20m, 6h, 2d, 1w). Older features are stale: the API never serves them and the
+#           globe expires them (live layers by last position time, static layers by last update).
+# attribution: optional credit line shown while the layer is visible (upstream licence terms); [text](https://...)
+#              renders as a link (adsb.fi, ODbL and CC BY-SA require linking the source or licence).
 version: 1
 layers:
   - id: maritime
@@ -22,6 +26,8 @@ layers:
     default_visible: true
     sources: [aisstream]
     description: Live vessel positions and recent tracks from terrestrial AIS.
+    max_age: 6h
+    attribution: "AIS: [AISStream.io](https://aisstream.io)"
 
   - id: aviation
     name: Aviation (ADS-B)
@@ -35,6 +41,8 @@ layers:
     default_visible: true
     sources: [opensky]
     description: Live aircraft positions at true geometric altitude (barometric fallback).
+    max_age: 20m
+    attribution: "Aircraft: [adsb.lol](https://adsb.lol) ([ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/)) · [adsb.fi](https://adsb.fi) open data (non-commercial) · [OpenSky Network](https://opensky-network.org) when enabled"
 
   - id: space
     name: Space (satellites)
@@ -48,6 +56,7 @@ layers:
     default_visible: false
     sources: [celestrak]
     description: SGP4-propagated positions and orbit trails from TLE/GP element sets, at true altitude.
+    attribution: "[CelesTrak](https://celestrak.org)"
 
   - id: fires
     name: Fires & thermal anomalies
@@ -61,6 +70,7 @@ layers:
     default_visible: true
     sources: [nasa_firms]
     description: NASA FIRMS VIIRS/MODIS hotspots (last 24h by default).
+    attribution: "[NASA FIRMS](https://firms.modaps.eosdis.nasa.gov)"
 
   - id: seismic
     name: Earthquakes
@@ -74,6 +84,7 @@ layers:
     default_visible: true
     sources: [usgs]
     description: USGS events; marker size scales with magnitude, depth shown in the inspector.
+    attribution: "[USGS Earthquake Hazards Program](https://earthquake.usgs.gov)"
 
   - id: conflict
     name: Armed conflict
@@ -100,6 +111,7 @@ layers:
     default_visible: false
     sources: [gdelt]
     description: GDELT 2.0 events geocoded to ActionGeo; heat by volume, colour by tone.
+    attribution: "[The GDELT Project](https://www.gdeltproject.org)"
 
   - id: weather
     name: Weather
@@ -127,6 +139,7 @@ layers:
     tiled: true
     sources: [opencellid]
     description: OpenCellID towers served as vector tiles (visible from zoom 10).
+    attribution: "[OpenCellID](https://opencellid.org) ([CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/))"
 
   - id: wifi
     name: Wi-Fi access points
@@ -153,7 +166,9 @@ layers:
     altitude: clamp
     default_visible: false
     sources: [tor_exit_nodes]
-    description: Relays and exits from Onionoo with their geolocation.
+    description: Relays and exits from Onionoo, placed by country (halos) now that Onionoo no longer geolocates to a city.
+    max_age: 6h
+    attribution: "[Tor Project · Onionoo](https://metrics.torproject.org/onionoo.html)"
 
   - id: cloud_regions
     name: Cloud regions

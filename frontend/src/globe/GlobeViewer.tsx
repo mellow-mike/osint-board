@@ -56,7 +56,7 @@ export function GlobeViewer() {
     const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
     handler.setInputAction((movement: Cesium.ScreenSpaceEventHandler.PositionedEvent) => {
       const f = pickedFeature(viewer.scene.pick(movement.position));
-      select(f ? { id: f.id, layer: f.layer, name: f.name, lat: f.lat, lon: f.lon, alt: f.alt, props: f.props } : null);
+      select(f ? { id: f.id, layer: f.layer, name: f.name, lat: f.lat, lon: f.lon, alt: f.alt, props: f.props, ts: f.ts } : null);
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
     let last = 0;
