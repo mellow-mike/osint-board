@@ -107,9 +107,7 @@ class WebServerIdentifier(ExtractModule):
         for product, version in parse_products(value):
             yield self._emit(product, version, role, name, content)
 
-    def _emit(
-        self, product: str, version: str | None, role: str, header: str, content: Content
-    ) -> Emit:
+    def _emit(self, product: str, version: str | None, role: str, header: str, content: Content) -> Emit:
         label = f"{product} {version}" if version else product
         return Emit(
             EntityType.SOFTWARE,

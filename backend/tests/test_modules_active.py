@@ -28,6 +28,7 @@ def _passive(mod, value: bool) -> None:
 
 # ---- authorisation gate --------------------------------------------------------------------------------------
 
+
 def test_active_module_refused_without_scope(registry):
     mod = registry.instantiate("port_scanner", scope=Scope(allow_active=False))
     _passive(mod, True)
@@ -59,7 +60,12 @@ async def test_active_lookup_refuses_when_passive(registry, module_id):
     mod = registry.instantiate(module_id, scope=Scope(allow_active=False))
     _passive(mod, True)
     with pytest.raises(AuthorizationError):
-        [e async for e in mod.lookup(DOMAIN if module_id != "port_scanner" else EntityRef(EntityType.IP, "203.0.113.5"))]
+        [
+            e
+            async for e in mod.lookup(
+                DOMAIN if module_id != "port_scanner" else EntityRef(EntityType.IP, "203.0.113.5")
+            )
+        ]
 
 
 def test_subdomain_takeover_is_not_gated(registry, catalog):
@@ -70,11 +76,13 @@ def test_subdomain_takeover_is_not_gated(registry, catalog):
 
 # ---- dns_bruteforce ------------------------------------------------------------------------------------------
 
+
 async def test_dns_bruteforce_finds_hosts(registry, fake_dns):
     fake_dns.on("www.example.com", ["203.0.113.10"], rtype="A")
     fake_dns.on("mail.example.com", ["203.0.113.11"], rtype="A")
-    mod = registry.instantiate("dns_bruteforce", scope=Scope(allow_active=True),
-                               config={"wordlist": ["www", "mail", "absent"]})
+    mod = registry.instantiate(
+        "dns_bruteforce", scope=Scope(allow_active=True), config={"wordlist": ["www", "mail", "absent"]}
+    )
     emits = [e async for e in mod.lookup(DOMAIN)]
     hosts = {e.value for e in emits if e.type is EntityType.HOSTNAME}
     ips = {e.value for e in emits if e.type is EntityType.IP}
@@ -84,15 +92,14 @@ async def test_dns_bruteforce_finds_hosts(registry, fake_dns):
 
 
 async def test_dns_bruteforce_drops_wildcard_answers(registry, fake_dns):
-    mod = registry.instantiate("dns_bruteforce", scope=Scope(allow_active=True),
-                               config={"wordlist": ["ghost", "real"]})
+    mod = registry.instantiate("dns_bruteforce", scope=Scope(allow_active=True), config={"wordlist": ["ghost", "real"]})
 
     async def fake_wildcard(resolver, domain):  # noqa: ANN001
         return {"203.0.113.99"}
 
     mod._wildcard_ips = fake_wildcard
     fake_dns.on("ghost.example.com", ["203.0.113.99"], rtype="A")  # only the wildcard address -> dropped
-    fake_dns.on("real.example.com", ["203.0.113.20"], rtype="A")   # a distinct address -> kept
+    fake_dns.on("real.example.com", ["203.0.113.20"], rtype="A")  # a distinct address -> kept
     emits = [e async for e in mod.lookup(DOMAIN)]
     assert {e.value for e in emits if e.type is EntityType.HOSTNAME} == {"real.example.com"}
 
@@ -156,6 +163,7 @@ async def test_dns_axfr_lookup_when_refused(registry, fake_dns):
 
 # ---- port_scanner --------------------------------------------------------------------------------------------
 
+
 def test_select_ports():
     assert select_ports({"ports": [443, 80, 80, 22]}) == [22, 80, 443]
     assert select_ports({"top": 3}) == list(COMMON_PORTS)[:3]
@@ -179,8 +187,9 @@ async def test_port_scanner_reports_open_ports(registry, monkeypatch):
         raise ConnectionRefusedError
 
     monkeypatch.setattr(asyncio, "open_connection", fake_open_connection)
-    mod = registry.instantiate("port_scanner", scope=Scope(allow_active=True),
-                               config={"ports": [22, 80, 443], "timeout": 0.5})
+    mod = registry.instantiate(
+        "port_scanner", scope=Scope(allow_active=True), config={"ports": [22, 80, 443], "timeout": 0.5}
+    )
     emits = [e async for e in mod.lookup(EntityRef(EntityType.IP, "203.0.113.5"))]
     assert {e.meta["port"] for e in emits} == {22, 443}
     assert all(e.type is EntityType.OPEN_PORT and e.meta["protocol"] == "tcp" for e in emits)
@@ -192,12 +201,12 @@ async def test_port_scanner_timeout_is_closed(registry, monkeypatch):
         await asyncio.sleep(10)
 
     monkeypatch.setattr(asyncio, "open_connection", always_hang)
-    mod = registry.instantiate("port_scanner", scope=Scope(allow_active=True),
-                               config={"ports": [22], "timeout": 0.05})
+    mod = registry.instantiate("port_scanner", scope=Scope(allow_active=True), config={"ports": [22], "timeout": 0.05})
     assert [e async for e in mod.lookup(EntityRef(EntityType.IP, "203.0.113.5"))] == []
 
 
 # ---- subdomain_takeover --------------------------------------------------------------------------------------
+
 
 def test_match_service_and_assess():
     assert match_service("abandoned.s3.amazonaws.com").name == "AWS S3"

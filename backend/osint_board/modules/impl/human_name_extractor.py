@@ -33,15 +33,11 @@ _META_AUTHOR_REV = re.compile(  # content before name= (attribute order varies)
 _JSONLD_AUTHOR = re.compile(r'"author"\s*:\s*(?:\{[^}]*?"name"\s*:\s*"([^"]+)"|"([^"]+)")', re.I)
 _REL_AUTHOR = re.compile(r"""<a[^>]+rel=["']author["'][^>]*>(.*?)</a>""", re.I | re.S)
 # A byline: "By " then 2-4 capitalised tokens (each a word — including O'Brien/McTavish — or an initial).
-_BYLINE = re.compile(
-    r"\bBy[:\s]+((?:[A-Z][A-Za-z'’.\-]*\s+){1,3}[A-Z][A-Za-z'’.\-]+)"
-)
+_BYLINE = re.compile(r"\bBy[:\s]+((?:[A-Z][A-Za-z'’.\-]*\s+){1,3}[A-Z][A-Za-z'’.\-]+)")
 
 _WS = re.compile(r"\s+")
 # A plausible personal name: 2-4 tokens, each a capitalised word (O'Brien, McTavish) or a single-letter initial.
-_NAME_OK = re.compile(
-    r"^(?:[A-Z][A-Za-z'’\-]+|[A-Z]\.?)(?:\s+(?:[A-Z][A-Za-z'’\-]+|[A-Z]\.?)){1,3}$"
-)
+_NAME_OK = re.compile(r"^(?:[A-Z][A-Za-z'’\-]+|[A-Z]\.?)(?:\s+(?:[A-Z][A-Za-z'’\-]+|[A-Z]\.?)){1,3}$")
 _HANDLE = re.compile(r"^@")
 _STOP = {"admin", "administrator", "editor", "staff", "team", "guest", "author", "unknown", "webmaster"}
 

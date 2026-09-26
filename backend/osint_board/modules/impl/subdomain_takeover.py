@@ -36,20 +36,31 @@ class Service:
 
 #: Curated from the public "can I take over xyz" corpus; kept to services with reliable, unambiguous fingerprints.
 SERVICES: tuple[Service, ...] = (
-    Service("GitHub Pages", (".github.io",),
-            ("There isn't a GitHub Pages site here.", "For root URLs (like http://example.com/) you must provide")),
-    Service("AWS S3", (".s3.amazonaws.com", ".s3-website", ".amazonaws.com"),
-            ("NoSuchBucket", "The specified bucket does not exist")),
-    Service("Heroku", (".herokuapp.com", ".herokudns.com"),
-            ("No such app", "herokucdn.com/error-pages/no-such-app.html"), nxdomain_vulnerable=True),
+    Service(
+        "GitHub Pages",
+        (".github.io",),
+        ("There isn't a GitHub Pages site here.", "For root URLs (like http://example.com/) you must provide"),
+    ),
+    Service(
+        "AWS S3",
+        (".s3.amazonaws.com", ".s3-website", ".amazonaws.com"),
+        ("NoSuchBucket", "The specified bucket does not exist"),
+    ),
+    Service(
+        "Heroku",
+        (".herokuapp.com", ".herokudns.com"),
+        ("No such app", "herokucdn.com/error-pages/no-such-app.html"),
+        nxdomain_vulnerable=True,
+    ),
     Service("Fastly", (".fastly.net",), ("Fastly error: unknown domain",)),
     Service("Bitbucket", (".bitbucket.io",), ("Repository not found",), nxdomain_vulnerable=True),
     Service("Shopify", (".myshopify.com",), ("Sorry, this shop is currently unavailable",)),
     Service("Ghost", (".ghost.io",), ("The thing you were looking for is no longer here",)),
     Service("Surge.sh", (".surge.sh",), ("project not found",)),
     Service("Pantheon", (".pantheonsite.io",), ("The gods are wise", "404 error unknown site")),
-    Service("Tumblr", (".domains.tumblr.com",),
-            ("Whatever you were looking for doesn't currently exist at this address",)),
+    Service(
+        "Tumblr", (".domains.tumblr.com",), ("Whatever you were looking for doesn't currently exist at this address",)
+    ),
     Service("Zendesk", (".zendesk.com",), ("Help Center Closed",)),
     Service("Read the Docs", (".readthedocs.io",), ("unknown to Read the Docs",), nxdomain_vulnerable=True),
     Service("WordPress.com", (".wordpress.com",), ("Do you want to register",)),

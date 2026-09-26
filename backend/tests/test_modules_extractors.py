@@ -32,6 +32,7 @@ def _extract(registry, module_id: str, text: str, *, parent_type=EntityType.RAW_
 
 # ---- web_server_identifier -----------------------------------------------------------------------------------
 
+
 def test_split_header():
     assert split_header("Server: nginx/1.18.0") == ("server", "nginx/1.18.0")
     assert split_header("nginx/1.18.0") == ("", "nginx/1.18.0")
@@ -51,27 +52,39 @@ def test_parse_products(value, expected):
 
 
 def test_web_server_identifier_emits(registry):
-    emits = _extract(registry, "web_server_identifier", "Server: nginx/1.18.0 (Ubuntu)",
-                     parent_type=EntityType.HTTP_HEADER)
+    emits = _extract(
+        registry, "web_server_identifier", "Server: nginx/1.18.0 (Ubuntu)", parent_type=EntityType.HTTP_HEADER
+    )
     assert [(e.value, e.type) for e in emits] == [("nginx 1.18.0", EntityType.SOFTWARE)]
     assert emits[0].meta["version"] == "1.18.0" and emits[0].relation == "runs"
     assert emits[0].parent.type is EntityType.HTTP_HEADER
 
 
 def test_web_server_identifier_powered_by_and_implied(registry):
-    assert _extract(registry, "web_server_identifier", "X-Powered-By: PHP/8.1.2",
-                    parent_type=EntityType.HTTP_HEADER)[0].value == "PHP 8.1.2"
-    implied = _extract(registry, "web_server_identifier", "X-Vercel-Id: iad1::abcd",
-                       parent_type=EntityType.HTTP_HEADER)
+    assert (
+        _extract(registry, "web_server_identifier", "X-Powered-By: PHP/8.1.2", parent_type=EntityType.HTTP_HEADER)[
+            0
+        ].value
+        == "PHP 8.1.2"
+    )
+    implied = _extract(registry, "web_server_identifier", "X-Vercel-Id: iad1::abcd", parent_type=EntityType.HTTP_HEADER)
     assert [e.value for e in implied] == ["Vercel"]
 
 
 def test_web_server_identifier_ignores_unrelated_headers(registry):
-    assert _extract(registry, "web_server_identifier", "Content-Type: text/html; charset=utf-8",
-                    parent_type=EntityType.HTTP_HEADER) == []
+    assert (
+        _extract(
+            registry,
+            "web_server_identifier",
+            "Content-Type: text/html; charset=utf-8",
+            parent_type=EntityType.HTTP_HEADER,
+        )
+        == []
+    )
 
 
 # ---- cookie_extractor ----------------------------------------------------------------------------------------
+
 
 def test_parse_set_cookie():
     c = parse_set_cookie("PHPSESSID=abc123; Path=/; HttpOnly; Secure; SameSite=Lax")
@@ -82,17 +95,24 @@ def test_parse_set_cookie():
 
 @pytest.mark.parametrize(
     ("name", "product"),
-    [("PHPSESSID", "PHP"), ("wordpress_logged_in_x", "WordPress"), ("laravel_session", "Laravel"),
-     ("random_name", None)],
+    [
+        ("PHPSESSID", "PHP"),
+        ("wordpress_logged_in_x", "WordPress"),
+        ("laravel_session", "Laravel"),
+        ("random_name", None),
+    ],
 )
 def test_cookie_software(name, product):
     assert software_for(name) == product
 
 
 def test_cookie_extractor_emits(registry):
-    emits = _extract(registry, "cookie_extractor",
-                     "Set-Cookie: PHPSESSID=abc; Path=/; HttpOnly; Secure; SameSite=Lax",
-                     parent_type=EntityType.HTTP_HEADER)
+    emits = _extract(
+        registry,
+        "cookie_extractor",
+        "Set-Cookie: PHPSESSID=abc; Path=/; HttpOnly; Secure; SameSite=Lax",
+        parent_type=EntityType.HTTP_HEADER,
+    )
     assert len(emits) == 1
     e = emits[0]
     assert e.type is EntityType.COOKIE and e.value == "PHPSESSID"
@@ -101,19 +121,19 @@ def test_cookie_extractor_emits(registry):
 
 
 def test_cookie_extractor_ignores_other_headers(registry):
-    assert _extract(registry, "cookie_extractor", "Server: nginx",
-                    parent_type=EntityType.HTTP_HEADER) == []
+    assert _extract(registry, "cookie_extractor", "Server: nginx", parent_type=EntityType.HTTP_HEADER) == []
 
 
 # ---- web_framework_identifier --------------------------------------------------------------------------------
 
+
 def test_parse_frameworks_generator_first():
     html = FIXTURES.joinpath("web/leaky_site.html").read_text()
     products = {p: v for p, v, _ in parse_frameworks(html)}
-    assert products["WordPress"] == "6.4.2"          # from the generator meta tag
+    assert products["WordPress"] == "6.4.2"  # from the generator meta tag
     assert products["jQuery"] == "3.6.0"
     assert products["Bootstrap"] == "5.3.1"
-    assert "Laravel" in products                      # csrf-token meta marker
+    assert "Laravel" in products  # csrf-token meta marker
 
 
 def test_web_framework_identifier_emits(registry):
@@ -131,12 +151,13 @@ def test_web_framework_identifier_deduplicates(registry):
 
 # ---- error_string_extractor ----------------------------------------------------------------------------------
 
+
 def test_find_errors_collapses_overlaps():
     text = "Warning: mysql_query(): supplied argument is not a valid MySQL result in /var/www/html/db.php on line 42"
     found = find_errors(text)
     techs = [t for _, t, _, _ in found]
-    assert "PHP" in techs                    # the widest signature wins for the warning line
-    assert techs.count("MySQL") == 0         # the contained MySQL sub-matches are dropped
+    assert "PHP" in techs  # the widest signature wins for the warning line
+    assert techs.count("MySQL") == 0  # the contained MySQL sub-matches are dropped
     # the filesystem path is a separate info-leak finding even though it sits inside the PHP warning
     assert any(cat == "leak" and "/var/www" in msg for msg, _, cat, _ in found)
 
@@ -144,7 +165,7 @@ def test_find_errors_collapses_overlaps():
 @pytest.mark.parametrize(
     ("text", "tech"),
     [
-        ("Traceback (most recent call last):\n  File \"/a.py\", line 1", "Python"),
+        ('Traceback (most recent call last):\n  File "/a.py", line 1', "Python"),
         ("ORA-00933: SQL command not properly ended", "Oracle"),
         ("Server Error in '/app' Application. System.NullReferenceException", "ASP.NET"),
         ("org.postgresql.util.PSQLException: ERROR", "PostgreSQL"),
@@ -161,6 +182,7 @@ def test_error_extractor_clean_page(registry):
 
 
 # ---- company_name_extractor ----------------------------------------------------------------------------------
+
 
 def test_find_companies():
     html = FIXTURES.joinpath("web/leaky_site.html").read_text()
@@ -181,6 +203,7 @@ def test_company_extractor_rejects_boilerplate(registry):
 
 # ---- human_name_extractor ------------------------------------------------------------------------------------
 
+
 def test_find_names():
     html = FIXTURES.joinpath("web/leaky_site.html").read_text()
     names = {name for name, _, _ in find_names(html)}
@@ -199,6 +222,7 @@ def test_human_name_confidence_by_source(registry):
 
 
 # ---- base64_decoder ------------------------------------------------------------------------------------------
+
 
 def test_find_base64_printable_only():
     encoded = base64.b64encode(b"contact admin@secret.example for the keys").decode()
@@ -227,6 +251,7 @@ def test_base64_decoder_emits_and_carries_text(registry):
 
 # ---- binary_strings ------------------------------------------------------------------------------------------
 
+
 def test_extract_strings_ascii_and_utf16():
     ascii_run = b"\x7fELF\x02\x01" + b"http://c2.example/beacon\x00" + b"\xff\xfe"
     utf16 = "MZsecret".encode("utf-16-le")  # each char followed by NUL
@@ -253,12 +278,18 @@ def test_binary_strings_empty_when_no_runs(registry):
 
 # ---- pipeline integration ------------------------------------------------------------------------------------
 
+
 def test_pipeline_chains_binary_strings_then_email(registry):
     """binary_strings produces raw_content, which the pipeline then re-scans with the raw_content extractors."""
     data = (b"\x00\x01" + b"exfil to mole@buried.example via beacon\x00").decode("latin-1")
     emits = [
-        Emit(EntityType.RAW_FILE, "file://mal.bin", relation="downloaded",
-             parent=EntityRef(EntityType.URL, SRC), meta={"text": data}),
+        Emit(
+            EntityType.RAW_FILE,
+            "file://mal.bin",
+            relation="downloaded",
+            parent=EntityRef(EntityType.URL, SRC),
+            meta={"text": data},
+        ),
     ]
     found = ExtractorPipeline(registry).run(emits)
     assert found["binary_strings"][0].type is EntityType.RAW_CONTENT

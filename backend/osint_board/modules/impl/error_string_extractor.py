@@ -25,25 +25,56 @@ from osint_board.modules.types import Content, Emit
 #: traceback patterns so an ``org.postgresql...`` exception is labelled PostgreSQL, not Java. ``leak`` matches
 #: (filesystem paths, config keys) are always kept even inside a larger error (see :func:`find_errors`).
 SIGNATURES: tuple[tuple[str, str, re.Pattern[str]], ...] = (
-    ("PHP", "runtime", re.compile(
-        r"(?:Fatal error|Warning|Parse error|Notice|Deprecated)\s*:.*?(?:in|on line)\s+.*?(?:\.php|line \d+)", re.I)),
+    (
+        "PHP",
+        "runtime",
+        re.compile(
+            r"(?:Fatal error|Warning|Parse error|Notice|Deprecated)\s*:.*?(?:in|on line)\s+.*?(?:\.php|line \d+)", re.I
+        ),
+    ),
     ("PHP", "runtime", re.compile(r"Stack trace:\s*#0\s")),
     ("Python", "traceback", re.compile(r"Traceback \(most recent call last\):")),
-    ("MySQL", "sql", re.compile(r"(?:You have an error in your SQL syntax|Warning: mysql_|"
-                                r"supplied argument is not a valid MySQL|com\.mysql\.jdbc)", re.I)),
-    ("PostgreSQL", "sql", re.compile(r"(?:PostgreSQL query failed|pg_query\(\)|"
-                                     r"org\.postgresql\.util\.\w+|ERROR:\s+syntax error at or near)", re.I)),
-    ("Microsoft SQL Server", "sql", re.compile(
-        r"(?:Microsoft OLE DB Provider for SQL Server|Unclosed quotation mark after|"
-        r"\[SQL Server\]|System\.Data\.SqlClient)", re.I)),
+    (
+        "MySQL",
+        "sql",
+        re.compile(
+            r"(?:You have an error in your SQL syntax|Warning: mysql_|"
+            r"supplied argument is not a valid MySQL|com\.mysql\.jdbc)",
+            re.I,
+        ),
+    ),
+    (
+        "PostgreSQL",
+        "sql",
+        re.compile(
+            r"(?:PostgreSQL query failed|pg_query\(\)|"
+            r"org\.postgresql\.util\.\w+|ERROR:\s+syntax error at or near)",
+            re.I,
+        ),
+    ),
+    (
+        "Microsoft SQL Server",
+        "sql",
+        re.compile(
+            r"(?:Microsoft OLE DB Provider for SQL Server|Unclosed quotation mark after|"
+            r"\[SQL Server\]|System\.Data\.SqlClient)",
+            re.I,
+        ),
+    ),
     ("Oracle", "sql", re.compile(r"\bORA-\d{5}\b")),
     ("SQLite", "sql", re.compile(r"SQLite3?::|sqlite3\.OperationalError", re.I)),
     ("ODBC", "sql", re.compile(r"\[Microsoft\]\[ODBC|ODBC Driver", re.I)),
     ("ASP.NET", "runtime", re.compile(r"Server Error in '.*?' Application|System\.[\w.]+Exception", re.I)),
     ("Ruby", "traceback", re.compile(r"\(NoMethodError\)|\.rb:\d+:in `")),
     ("Node.js", "traceback", re.compile(r"at\s+[\w.]+\s+\(?/[\w./-]+\.js:\d+:\d+\)?")),
-    ("Java", "traceback", re.compile(r"\b(?:java|javax|org|com)\.(?!postgresql|mysql)[\w.]+(?:Exception|Error)\b"
-                                      r"(?::.*)?(?:\s+at\s+[\w.$]+\([\w.]+:\d+\))?")),
+    (
+        "Java",
+        "traceback",
+        re.compile(
+            r"\b(?:java|javax|org|com)\.(?!postgresql|mysql)[\w.]+(?:Exception|Error)\b"
+            r"(?::.*)?(?:\s+at\s+[\w.$]+\([\w.]+:\d+\))?"
+        ),
+    ),
     ("Java", "traceback", re.compile(r"\bat\s+[\w.$]+\([\w.]+\.java:\d+\)")),
     ("filesystem path", "leak", re.compile(r"(?:/(?:var|home|usr|opt|srv)/[\w./-]+|[A-Za-z]:\\[\w\\.-]+)")),
     ("config dump", "leak", re.compile(r"(?m)^\s*(?:DB_PASSWORD|SECRET_KEY|API_KEY|AWS_SECRET)\s*[:=]", re.I)),

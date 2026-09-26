@@ -63,7 +63,10 @@ def records_to_emits(records: list[tuple[str, str, str]], target: EntityRef, ser
         if rtype in ADDRESS_RTYPES:
             emits.append(
                 Emit(
-                    EntityType.IP, rdata, relation="resolves_to", parent=host_ref(name, domain),
+                    EntityType.IP,
+                    rdata,
+                    relation="resolves_to",
+                    parent=host_ref(name, domain),
                     meta={"host": name, "via": "axfr", "rrtype": rtype},
                 )
             )
