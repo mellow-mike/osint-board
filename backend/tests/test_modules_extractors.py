@@ -244,9 +244,12 @@ def test_base64_urlsafe_and_data_uri():
 def test_base64_decoder_emits_and_carries_text(registry):
     encoded = base64.b64encode(b"reach me at ops@hidden.example").decode()
     emits = _extract(registry, "base64_decoder", f"data={encoded}")
-    assert len(emits) == 1 and emits[0].type is EntityType.BASE64_STRING
-    assert emits[0].meta["text"] == "reach me at ops@hidden.example"
-    assert emits[0].relation == "decodes_to"
+    # The finding (the encoded blob) plus a raw_content carrier for the decoded plaintext.
+    by_type = {e.type: e for e in emits}
+    assert by_type[EntityType.BASE64_STRING].value == encoded
+    assert by_type[EntityType.BASE64_STRING].meta["decoded"] == "reach me at ops@hidden.example"
+    assert by_type[EntityType.RAW_CONTENT].meta["text"] == "reach me at ops@hidden.example"
+    assert by_type[EntityType.RAW_CONTENT].meta["source"] == "base64_decoder"
 
 
 # ---- binary_strings ------------------------------------------------------------------------------------------
@@ -294,3 +297,20 @@ def test_pipeline_chains_binary_strings_then_email(registry):
     found = ExtractorPipeline(registry).run(emits)
     assert found["binary_strings"][0].type is EntityType.RAW_CONTENT
     assert {e.value for e in found["email_extractor"]} == {"mole@buried.example"}
+
+
+def test_pipeline_chains_base64_then_email(registry):
+    """base64_decoder re-emits the decoded plaintext as raw_content, so a hidden e-mail reaches email_extractor."""
+    encoded = base64.b64encode(b"contact spy@covert.example about the drop").decode()
+    emits = [
+        Emit(
+            EntityType.RAW_CONTENT,
+            "page",
+            relation="page",
+            parent=EntityRef(EntityType.URL, SRC),
+            meta={"text": f"payload={encoded}"},
+        ),
+    ]
+    found = ExtractorPipeline(registry).run(emits)
+    assert any(e.type is EntityType.RAW_CONTENT for e in found["base64_decoder"])
+    assert {e.value for e in found["email_extractor"]} == {"spy@covert.example"}

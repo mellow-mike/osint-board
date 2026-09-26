@@ -410,6 +410,7 @@ modules:
       - raw_content
     produces:
       - base64_string
+      - raw_content
     geo: none
     layer: null
     phase: 2

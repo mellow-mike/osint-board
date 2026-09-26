@@ -2,12 +2,14 @@
 
 Catalog: base64_decoder · internal · extract · access=local · phase 2
 Consumes: raw_content, url
-Produces: base64_string
+Produces: base64_string, raw_content
 
 Base64 hides indicators from a naive scan: an exfiltration URL, an e-mail, a config blob. This extractor finds
-substantial base64 substrings (including URL-safe and data: URIs), decodes the ones that come out as printable
-text, and emits a ``base64_string`` whose ``meta["text"]`` is the decoded plaintext — so the extractor pipeline
-runs every other extractor over the decoded content on its next round.
+substantial base64 substrings (including URL-safe and data: URIs) and decodes the ones that come out as
+printable text. Each decoded blob becomes a ``base64_string`` finding, and the concatenated plaintext is also
+re-emitted as a single ``raw_content`` document (the ``binary_strings`` pattern) so the extractor pipeline runs
+every other extractor over the decoded content on its next round — the ``base64_string`` type is consumed by
+nothing, so carrying the text there alone would never be re-scanned.
 """
 
 from __future__ import annotations
@@ -80,7 +82,8 @@ def find_base64(text: str) -> list[tuple[str, str, int]]:
 @module("base64_decoder")
 class Base64Decoder(ExtractModule):
     def extract(self, content: Content) -> Iterable[Emit]:
-        for encoded, decoded, offset in find_base64(content.text):
+        blobs = find_base64(content.text)
+        for encoded, decoded, offset in blobs:
             yield Emit(
                 EntityType.BASE64_STRING,
                 encoded[:200],
@@ -89,9 +92,29 @@ class Base64Decoder(ExtractModule):
                 parent=content.parent,
                 meta={
                     "decoded": decoded[:2000],
-                    "text": decoded,  # let the pipeline scan the plaintext on its next round
                     "encoded_length": len(encoded),
                     "offset": offset,
                     "source_url": content.source_url,
                 },
             )
+        if not blobs:
+            return
+        # Re-feed the decoded plaintext as raw_content so the pipeline runs the other extractors over it (an
+        # e-mail or URL hidden in a base64 blob). base64_string is consumed by nothing, so the text has to ride
+        # a raw_content emit to be re-scanned.
+        recovered = "\n".join(decoded for _, decoded, _ in blobs)
+        identity = content.source_url or (content.parent.value if content.parent else "base64")
+        yield Emit(
+            EntityType.RAW_CONTENT,
+            identity,
+            confidence=1.0,
+            relation="decodes_to",
+            parent=content.parent,
+            meta={
+                "text": recovered,
+                "content_type": "text/plain",
+                "url": content.source_url,
+                "count": len(blobs),
+                "source": "base64_decoder",
+            },
+        )
