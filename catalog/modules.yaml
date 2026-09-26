@@ -410,6 +410,7 @@ modules:
       - raw_content
     produces:
       - base64_string
+      - raw_content
     geo: none
     layer: null
     phase: 2
@@ -1249,6 +1250,7 @@ modules:
     phase: 2
     priority: normal
     replacement: *id001
+    requires_authorization: true
   - id: dns_bruteforce
     name: DNS Brute-forcer
     url: null
@@ -1268,6 +1270,7 @@ modules:
     phase: 2
     priority: high
     replacement: *id001
+    requires_authorization: true
     notes: >-
       Wordlists (commonspeak2, assetnote), permutation engine, wildcard detection, massdns-class throughput.
   - id: dns_for_family
