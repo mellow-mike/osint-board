@@ -60,8 +60,13 @@ extractors run over it). The four active internal recon modules are now implemen
 `subdomain_takeover` (dangling-CNAME check, itself passive). The first three go through `ctx.check_authorized`,
 which now honours `OSINT_PASSIVE_ONLY`: while it is on (the default) they are refused unless the investigation
 scope names the target; the catalog's `requires_authorization` was corrected so DNS brute force and zone
-transfer are gated as the security policy always specified. The remaining internal lookups (`ssl_analyzer`,
-`page_info`, `similar_domains`, `file_metadata` …) and the 13 external tools are next.
+transfer are gated as the security policy always specified. The passive web/domain recon lookups are now
+implemented too and, reading only public DNS or content another module collected, stay ungated: `similar_domains`
+(a pure dnstwist-compatible permutation engine that resolves the look-alikes to report the registered ones),
+`page_info` (form / password / upload / redirect / embed analysis of a page's markup) and `strange_headers`
+(non-standard response headers, flagging the ones that leak an internal host, address or version) — each with a
+pure analyser exercised offline against a fixture. The remaining internal lookups (`ssl_analyzer`,
+`file_metadata`, `tld_searcher`, `dns_srv`, `account_finder` …) and the 13 external tools are next.
 
 ### The 24-hour soak is a soft gate
 

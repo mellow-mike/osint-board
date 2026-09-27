@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head>
+  <title>  Members &mdash; Sign in  </title>
+  <meta name="generator" content="WordPress 6.4.2">
+  <meta http-equiv="refresh" content="5; url=/dashboard">
+  <link rel="stylesheet" href="/style.css">
+  <script src="https://cdn.thirdparty.net/analytics.js"></script>
+  <script src="/local.js"></script>
+</head>
+<body>
+  <h1>Sign in</h1>
+  <!-- TODO: remove debug banner before launch -->
+  <form method="POST" action="https://auth.partner.example/session">
+    <input type="text" name="username" autocomplete="username">
+    <input type="password" name="password">
+    <input type="hidden" name="csrf_token" value="deadbeef">
+    <button type="submit">Log in</button>
+  </form>
+
+  <form method="post" action="http://uploads.plain.example/receive">
+    <input type="file" name="attachment">
+    <input type="email" name="notify">
+    <input type="submit" value="Send">
+  </form>
+
+  <iframe src="https://widgets.thirdparty.net/chat"></iframe>
+  <object data="/legacy/player.swf" type="application/x-shockwave-flash"></object>
+</body>
+</html>
