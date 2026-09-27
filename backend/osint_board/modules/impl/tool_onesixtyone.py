@@ -5,17 +5,21 @@ Consumes: ip, netblock
 Produces: ip, open_port, software
 
 onesixtyone answers one ``<address> [<community>] <system-descriptor>`` line per responsive host; the parser is
-pure. Active: gated by ``ctx.check_authorized``.
+pure. It takes a single host positionally and does not expand CIDR notation, so a ``netblock`` target is written
+to a temporary ``-i`` input file of individual addresses instead. Active: gated by ``ctx.check_authorized``.
 """
 
 from __future__ import annotations
 
 import re
+import tempfile
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 from osint_board.entities.types import EntityType
 from osint_board.modules import subproc
 from osint_board.modules.base import LookupModule
+from osint_board.modules.helpers import hosts_in
 from osint_board.modules.registry import module
 from osint_board.modules.types import Emit, EntityRef
 
@@ -72,13 +76,32 @@ class ToolOnesixtyone(LookupModule):
 
     async def lookup(self, target: EntityRef) -> AsyncIterator[Emit]:
         self.ctx.check_authorized(target)
-        argv = ["onesixtyone", *self.ctx.config.get("args", []), subproc.as_scan_target(target.value)]
+        args = self.ctx.config.get("args", [])
         timeout = float(self.ctx.config.get("timeout", 600))
-        try:
-            result = await subproc.run_tool(argv, timeout=timeout)
-        except subproc.ToolTimeout as exc:
-            self.log.warning("tool_onesixtyone.timeout", error=str(exc))
+        if target.type is EntityType.NETBLOCK:
+            limit = int(self.ctx.config.get("max_hosts", 4096))
+            hosts = hosts_in(target.value, limit=limit)
+            if not hosts:
+                return
+            if len(hosts) == limit:  # never silently truncate a large range
+                self.log.warning("tool_onesixtyone.netblock_capped", netblock=target.value, limit=limit)
+            with tempfile.TemporaryDirectory() as tmp:
+                infile = Path(tmp) / "targets.txt"
+                infile.write_text("\n".join(hosts) + "\n")
+                argv = ["onesixtyone", *args, "-i", str(infile)]
+                result = await self._run(argv, timeout)
+        else:  # a single ip host, passed positionally (refuse a flag-like value)
+            argv = ["onesixtyone", *args, subproc.as_scan_target(target.value)]
+            result = await self._run(argv, timeout)
+        if result is None:
             return
         for e in parse_onesixtyone(result.stdout, target):
             if e.type in self.spec.produces:
                 yield e
+
+    async def _run(self, argv: list[str], timeout: float) -> subproc.ToolResult | None:
+        try:
+            return await subproc.run_tool(argv, timeout=timeout)
+        except subproc.ToolTimeout as exc:
+            self.log.warning("tool_onesixtyone.timeout", error=str(exc))
+            return None

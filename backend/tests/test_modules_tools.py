@@ -318,6 +318,36 @@ async def test_onesixtyone_lookup_gated(registry, monkeypatch):
     assert _by_type([e async for e in mod.lookup(target)], EntityType.OPEN_PORT)
 
 
+async def test_onesixtyone_netblock_is_expanded_into_an_input_file(registry, monkeypatch):
+    seen = {}
+
+    async def _fake(argv, *, timeout=600.0, env=None, cwd=None, max_bytes=64 << 20):  # noqa: ANN001
+        argv = list(argv)
+        seen["argv"] = argv
+        seen["hosts"] = Path(argv[argv.index("-i") + 1]).read_text().split()  # read while tmp still exists
+        return subproc.ToolResult(argv=argv, stdout=_read("onesixtyone.txt"), stderr="", returncode=0)
+
+    monkeypatch.setattr(subproc, "run_tool", _fake)
+    mod = registry.instantiate("tool_onesixtyone", scope=Scope(allow_active=True))
+    emits = [e async for e in mod.lookup(EntityRef(EntityType.NETBLOCK, "192.0.2.0/30"))]
+    assert "-i" in seen["argv"] and "192.0.2.0/30" not in seen["argv"]  # onesixtyone can't expand a CIDR itself
+    assert seen["hosts"] == ["192.0.2.1", "192.0.2.2"]  # the two usable /30 hosts, one per line
+    assert _by_type(emits, EntityType.OPEN_PORT)
+
+
+async def test_onesixtyone_ip_target_is_positional(registry, monkeypatch):
+    seen = {}
+
+    async def _fake(argv, **kwargs):  # noqa: ANN001
+        seen["argv"] = list(argv)
+        return subproc.ToolResult(argv=list(argv), stdout="", stderr="", returncode=0)
+
+    monkeypatch.setattr(subproc, "run_tool", _fake)
+    mod = registry.instantiate("tool_onesixtyone", scope=Scope(allow_active=True))
+    [e async for e in mod.lookup(EntityRef(EntityType.IP, "192.0.2.20"))]
+    assert seen["argv"][-1] == "192.0.2.20" and "-i" not in seen["argv"]
+
+
 # ---- cmseek (reads a JSON file from its own Result tree) ---------------------------------------------------------
 
 

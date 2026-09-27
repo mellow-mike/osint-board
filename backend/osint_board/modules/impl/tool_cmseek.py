@@ -94,13 +94,11 @@ class ToolCmseek(LookupModule):
             except subproc.ToolTimeout as exc:
                 self.log.warning("tool_cmseek.timeout", error=str(exc))
                 return
-            # CMSeeK writes its Result/<sanitized-url>/cms.json tree relative to the working directory (tmp);
-            # older checkouts wrote it beside cmseek.py, so read tmp first and fall back to the checkout root.
-            rel = Path("Result") / _result_dir(url) / "cms.json"
-            payload = next(
-                (p.read_text(errors="replace") for base in (tmp, root) if (p := Path(base) / rel).exists()),
-                "",
-            )
+            # CMSeeK writes its Result/<sanitized-url>/cms.json tree relative to the working directory. Read only
+            # from this run's fresh tmp dir: a nonzero exit (which run_tool does not treat as failure) then yields
+            # nothing rather than re-emitting a stale result left in a persistent checkout by an earlier scan.
+            result_path = Path(tmp) / "Result" / _result_dir(url) / "cms.json"
+            payload = result_path.read_text(errors="replace") if result_path.exists() else ""
         for e in parse_cmseek_json(payload, target):
             if e.type in self.spec.produces:
                 yield e
