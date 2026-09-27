@@ -22,7 +22,7 @@ import re
 import struct
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime, timedelta, timezone
 from urllib.parse import urlsplit
 
 from osint_board.entities.types import EntityType
@@ -251,14 +251,29 @@ def _pdf_unescape(raw: bytes) -> str:
     return body.decode("latin-1", "replace").strip()
 
 
+def _pdf_tzinfo(token: str | None) -> timezone | None:
+    """A PDF date's trailing offset (``Z``, ``+02'00'``, ``-0500``) → a ``timezone``; ``None`` when absent."""
+    if not token:
+        return None
+    if token[0] in "Zz":
+        return UTC
+    digits = re.sub(r"\D", "", token[1:])
+    hours, minutes = int(digits[:2] or 0), int(digits[2:4] or 0)
+    offset = timedelta(hours=hours, minutes=minutes)
+    return timezone(offset if token[0] == "+" else -offset)
+
+
 def parse_pdf_date(value: str) -> datetime | None:
-    """Parse a PDF ``D:YYYYMMDDHHmmSS`` date (trailing timezone/parts optional) into a datetime."""
-    m = re.match(r"D:(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?", value.strip())
+    """Parse a PDF ``D:YYYYMMDDHHmmSS`` date into a datetime, keeping the trailing timezone offset when present
+    (so ``D:20210615143000+02'00'`` is an aware 14:30+02:00 = 12:30 UTC, not a naive 14:30)."""
+    m = re.match(r"D:(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?([Zz]|[+-]\d{2}'?(?:\d{2})?'?)?", value.strip())
     if not m:
         return to_datetime(value)
-    y, mo, d, h, mi, s = (int(g) if g else default for g, default in zip(m.groups(), (0, 1, 1, 0, 0, 0), strict=True))
+    y, mo, d, h, mi, s = (
+        int(g) if g else default for g, default in zip(m.groups()[:6], (0, 1, 1, 0, 0, 0), strict=True)
+    )
     try:
-        return datetime(y, mo or 1, d or 1, h, mi, s)
+        return datetime(y, mo or 1, d or 1, h, mi, s, tzinfo=_pdf_tzinfo(m.group(7)))
     except ValueError:
         return None
 

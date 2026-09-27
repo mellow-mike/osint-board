@@ -412,8 +412,13 @@ def test_extract_metadata_from_jpeg_collects_entities():
 
 
 def test_parse_pdf_date():
-    assert parse_pdf_date("D:20210615143000+02'00'") == datetime(2021, 6, 15, 14, 30, 0)
-    assert parse_pdf_date("D:2021") == datetime(2021, 1, 1, 0, 0, 0)
+    from datetime import UTC, timedelta, timezone
+
+    aware = parse_pdf_date("D:20210615143000+02'00'")
+    assert aware == datetime(2021, 6, 15, 14, 30, tzinfo=timezone(timedelta(hours=2)))
+    assert aware.utcoffset() == timedelta(hours=2)  # offset preserved: the real instant is 12:30 UTC
+    assert parse_pdf_date("D:20210615143000Z") == datetime(2021, 6, 15, 14, 30, tzinfo=UTC)
+    assert parse_pdf_date("D:2021") == datetime(2021, 1, 1, 0, 0, 0)  # naive when no offset is given
     assert parse_pdf_date("junk") is None
 
 

@@ -489,6 +489,7 @@ def _cert(
     not_before="May 01 00:00:00 2025 GMT",
     not_after="Aug 01 00:00:00 2025 GMT",
     sans=("example.com", "www.example.com"),
+    ip_sans=(),
     serial="03A1",
 ):
     # a self-signed cert (issuer == subject) is expressed by issuer_org=None + issuer_cn == subject_cn
@@ -496,13 +497,14 @@ def _cert(
     if issuer_org is not None:
         issuer_rdns.append((("organizationName", issuer_org),))
     issuer_rdns.append((("commonName", issuer_cn),))
+    alt = tuple(("DNS", s) for s in sans) + tuple(("IP Address", ip) for ip in ip_sans)
     return {
         "subject": ((("commonName", subject_cn),),),
         "issuer": tuple(issuer_rdns),
         "serialNumber": serial,
         "notBefore": not_before,
         "notAfter": not_after,
-        "subjectAltName": tuple(("DNS", s) for s in sans),
+        "subjectAltName": alt,
     }
 
 
@@ -548,15 +550,31 @@ def test_analyze_certificate_self_signed_and_over_long():
     assert lng.over_long
 
 
-def test_analyze_certificate_hostname_mismatch_but_not_for_ips():
+def test_analyze_certificate_hostname_mismatch():
     assert analyze_certificate(_cert(sans=("example.com",)), "evil.com", now=_NOW).hostname_mismatch is True
     assert analyze_certificate(_cert(sans=("example.com",)), "example.com", now=_NOW).hostname_mismatch is False
     assert analyze_certificate(_cert(sans=("example.com",)), None, now=_NOW).hostname_mismatch is False
 
 
-def test_analyze_certificate_falls_back_to_cn_when_no_san():
-    a = analyze_certificate(_cert(subject_cn="legacy.example.com", sans=()), None, now=_NOW)
-    assert a.dns_names == ["legacy.example.com"]
+def test_analyze_certificate_ignores_cn_when_sans_are_present():
+    # SAN other.example, CN target.example: the CN must not make target.example a covered name (RFC 6125)
+    a = analyze_certificate(_cert(subject_cn="target.example", sans=("other.example",)), "target.example", now=_NOW)
+    assert a.dns_names == ["other.example"] and a.hostname_mismatch is True
+
+
+def test_analyze_certificate_falls_back_to_cn_only_when_no_san():
+    a = analyze_certificate(_cert(subject_cn="legacy.example.com", sans=()), "legacy.example.com", now=_NOW)
+    assert a.dns_names == ["legacy.example.com"] and a.hostname_mismatch is False
+
+
+def test_analyze_certificate_matches_ip_targets_against_ip_sans():
+    cert = _cert(subject_cn="host", sans=("host.example",), ip_sans=("203.0.113.7", "2001:db8::1"))
+    assert analyze_certificate(cert, "203.0.113.7", now=_NOW).hostname_mismatch is False  # covered IP SAN
+    assert analyze_certificate(cert, "2001:0db8:0:0:0:0:0:1", now=_NOW).hostname_mismatch is False  # canonicalised
+    assert analyze_certificate(cert, "203.0.113.9", now=_NOW).hostname_mismatch is True  # a different address
+    assert analyze_certificate(cert, "203.0.113.7", now=_NOW).ip_sans == ["203.0.113.7", "2001:db8::1"]
+    # a cert with only DNS SANs does not cover a bare IP target
+    assert analyze_certificate(_cert(sans=("host.example",)), "203.0.113.7", now=_NOW).hostname_mismatch is True
 
 
 async def test_ssl_analyzer_lookup_emits_cert_sans_and_verdicts(registry):

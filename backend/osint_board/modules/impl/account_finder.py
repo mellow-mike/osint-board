@@ -113,12 +113,17 @@ def profile_url(site: Site, username: str) -> str:
 
 
 def account_exists(site: Site, status: int, final_url: str, body: str) -> bool:
-    """Whether the probe says an account exists, per the site's declared "not found" style."""
+    """Whether the probe says an account exists, per the site's declared "not found" style.
+
+    A non-2xx final status is treated as "not found" for every style: a 404/403 or a 5xx page does not contain the
+    site's error string either, so applying the message/redirect detectors to it would report a false profile."""
+    if not 200 <= status < 300:
+        return False
     if site.error_type == "message":
         return not any(msg and msg in body for msg in site.error_messages)
     if site.error_type == "response_url":
         return not (site.error_url and final_url.rstrip("/") == site.error_url.rstrip("/"))
-    return 200 <= status < 300  # status_code (the default)
+    return True  # status_code style: a 2xx is the account
 
 
 def username_from_target(target: EntityRef) -> tuple[str, bool]:

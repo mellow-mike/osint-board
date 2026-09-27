@@ -19,6 +19,7 @@ so the module is passive and not authorisation-gated.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import ssl
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
@@ -82,6 +83,7 @@ class CertAnalysis:
     not_after: datetime | None
     serial: str | None
     dns_names: list[str] = field(default_factory=list)
+    ip_sans: list[str] = field(default_factory=list)
     self_signed: bool = False
     expired: bool = False
     not_yet_valid: bool = False
@@ -121,6 +123,7 @@ class CertAnalysis:
             "not_after": self.not_after.isoformat() if self.not_after else None,
             "serial": self.serial,
             "dns_names": self.dns_names,
+            "ip_sans": self.ip_sans,
             "self_signed": self.self_signed,
             "expired": self.expired,
             "expiring_soon": self.expiring_soon,
@@ -146,6 +149,7 @@ def analyze_certificate(
     not_after = _cert_datetime(cert.get("notAfter"))
 
     dns_names: list[str] = []
+    ip_sans: list[str] = []
     seen: set[str] = set()
     for typ, val in cert.get("subjectAltName", ()):  # ('DNS', 'example.com'), ('IP Address', '::1') …
         if typ == "DNS":
@@ -153,8 +157,14 @@ def analyze_certificate(
             if low and low not in seen:
                 seen.add(low)
                 dns_names.append(low)
+        elif typ == "IP Address":
+            canon = _canonical_ip(str(val))
+            if canon and canon not in ip_sans:
+                ip_sans.append(canon)
     cn = subject.get("commonName")
-    if cn and cn.lower().rstrip(".") not in seen:  # some legacy certs carry the name only in the CN
+    # RFC 6125 / RFC 2818: the CN is only a fallback identity when the certificate carries no SANs at all; when
+    # SANs are present the CN must be ignored for identity matching (and is not a "covered name").
+    if cn and not dns_names and not ip_sans:
         dns_names.append(cn.lower().rstrip("."))
 
     analysis = CertAnalysis(
@@ -166,6 +176,7 @@ def analyze_certificate(
         not_after=not_after,
         serial=cert.get("serialNumber"),
         dns_names=dns_names,
+        ip_sans=ip_sans,
         self_signed=bool(subject) and subject == issuer,
     )
     if not_after is not None:
@@ -175,9 +186,30 @@ def analyze_certificate(
         analysis.not_yet_valid = now < not_before
     if not_before is not None and not_after is not None:
         analysis.over_long = (not_after - not_before).days > _MAX_VALIDITY_DAYS
-    if host and not is_ip(host) and dns_names:
-        analysis.hostname_mismatch = not host_matches(host, dns_names)
+    analysis.hostname_mismatch = _mismatch(host, dns_names, ip_sans)
     return analysis
+
+
+def _canonical_ip(value: str) -> str | None:
+    try:
+        return str(ipaddress.ip_address(value.strip()))
+    except ValueError:
+        return None
+
+
+def _mismatch(host: str | None, dns_names: list[str], ip_sans: list[str]) -> bool:
+    """Whether the certificate fails to cover ``host``. Only decided when the certificate carries an identity to
+    compare against — otherwise ``False`` (unknown, not a mismatch)."""
+    if not host:
+        return False
+    canon = _canonical_ip(host)
+    if canon is not None:  # an IP target is matched against IP-address SANs, never against DNS names
+        if ip_sans:
+            return canon not in ip_sans
+        return bool(dns_names)  # a cert that names hosts but no IPs does not cover this address
+    if dns_names:
+        return not host_matches(host, dns_names)
+    return False
 
 
 #: OpenSSL verify-failure reasons mapped to a ``(label, category)`` verdict, matched as a substring of the message.
@@ -261,7 +293,9 @@ class SslAnalyzer(LookupModule):
                         detail=verify_error,
                     )
                 continue
-            analysis = analyze_certificate(cert, server_name, expiry_warn_days=warn_days)
+            analysis = analyze_certificate(
+                cert, host, expiry_warn_days=warn_days
+            )  # host (incl. a bare IP) for matching
             cert_id = (
                 f"{analysis.subject_cn or host} (#{analysis.serial})"
                 if analysis.serial

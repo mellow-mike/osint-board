@@ -247,9 +247,13 @@ def test_account_exists_by_status_message_and_redirect():
     msg = Site("S", "u/{}", "message", error_messages=("no such user",))
     assert account_exists(msg, 200, "u/x", "welcome home") is True
     assert account_exists(msg, 200, "u/x", "sorry, no such user here") is False
+    # a non-2xx page (404/403/5xx) omits the error string too — it must not be read as an existing account
+    assert account_exists(msg, 404, "u/x", "generic not found page") is False
+    assert account_exists(msg, 503, "u/x", "") is False
     redir = Site("S", "u/{}", "response_url", error_url="https://s.test/404")
     assert account_exists(redir, 200, "https://s.test/404", "") is False
     assert account_exists(redir, 200, "https://s.test/alice", "") is True
+    assert account_exists(redir, 404, "https://s.test/alice", "") is False  # a 404 is absent, not a hit
 
 
 def test_username_from_target_uses_email_local_part():
