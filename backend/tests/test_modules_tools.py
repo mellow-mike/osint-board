@@ -88,6 +88,19 @@ def test_parse_nmap_xml_no_self_link_for_an_ip_target():
     assert _by_type(emits, EntityType.IP) == []  # the scanned host is the target itself
 
 
+def test_parse_nmap_xml_no_self_link_for_a_noncanonical_ipv6_target():
+    xml = (
+        '<nmaprun><host><status state="up"/><address addr="2001:db8::1" addrtype="ipv6"/>'
+        '<ports><port protocol="tcp" portid="22"><state state="open"/><service name="ssh"/></port></ports>'
+        "</host></nmaprun>"
+    )
+    # target spelled non-canonically (expanded, uppercase); nmap reports the compressed form 2001:db8::1
+    target = EntityRef(EntityType.IP, "2001:0DB8:0000:0000:0000:0000:0000:0001")
+    emits = parse_nmap_xml(xml, target)
+    assert _by_type(emits, EntityType.IP) == []  # same address canonically: no IP self-loop
+    assert _by_type(emits, EntityType.OPEN_PORT)  # ports still parsed
+
+
 def test_parse_nmap_xml_tolerates_banner_before_xml():
     xml = "Starting Nmap 7.94\n" + _read("nmap.xml")
     assert parse_nmap_xml(xml, EntityRef(EntityType.IP, "203.0.113.10"))

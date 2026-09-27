@@ -39,6 +39,17 @@ def _ref(addr: str) -> EntityRef:
         return EntityRef(EntityType.HOSTNAME, addr)
 
 
+def _is_ip_target_self(addr: str, target: EntityRef) -> bool:
+    """True when ``target`` is the IP entity naming ``addr``, comparing canonical forms so a noncanonical IPv6
+    target (expanded or uppercase) is not mistaken for a different discovered host and self-linked."""
+    if target.type is not EntityType.IP:
+        return False
+    try:
+        return ipaddress.ip_address(addr) == ipaddress.ip_address(target.value)
+    except ValueError:
+        return addr == target.value
+
+
 def parse_nmap_xml(text: str, target: EntityRef) -> list[Emit]:
     """nmap ``-oX`` output → open ports, service software and host-OS matches for every ``up`` host.
 
@@ -65,7 +76,7 @@ def parse_nmap_xml(text: str, target: EntityRef) -> list[Emit]:
         addrs = ip_addrs or [a.get("addr") for a in host.findall("address") if a.get("addr")]
         addr = addrs[0] if addrs else target.value
         ref = _ref(addr)
-        if ref.type is EntityType.IP and addr != target.value:  # connect the discovered host to the target
+        if ref.type is EntityType.IP and not _is_ip_target_self(addr, target):  # connect the host to the target
             rel = "resolves_to" if target.type is EntityType.HOSTNAME else "contains"
             emits.append(
                 Emit(EntityType.IP, addr, relation=rel, parent=target, meta={"host": addr, "source": "tool_nmap"})
