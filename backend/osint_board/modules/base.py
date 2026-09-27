@@ -81,11 +81,23 @@ class Scope:
 
 
 def _cidr_contains(cidr: str, value: str) -> bool:
+    """Whether ``value`` (a single address *or* a whole CIDR target) falls within the scope entry ``cidr``.
+
+    A netblock scanner authorised against a supernet (``10.0.0.0/8``) must be allowed on an in-scope subnet
+    (``10.1.0.0/16``), so a CIDR ``value`` is matched by :meth:`subnet_of` as well as a bare host by membership."""
     import ipaddress
 
     try:
-        return ipaddress.ip_address(value) in ipaddress.ip_network(cidr, strict=False)
+        net = ipaddress.ip_network(cidr, strict=False)
     except ValueError:
+        return False
+    try:
+        return ipaddress.ip_address(value) in net
+    except ValueError:
+        pass
+    try:
+        return ipaddress.ip_network(value, strict=False).subnet_of(net)
+    except (ValueError, TypeError):  # not a CIDR, or a v4/v6 version mismatch
         return False
 
 

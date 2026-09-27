@@ -91,6 +91,13 @@ class CrossReferencer(LookupModule):
             return
         final_url, html = fetched
 
+        # The HTTP client follows redirects; if the candidate redirected off its own site (a parked domain, a URL
+        # shortener, a compromised host), the page we fetched is not the candidate's, so a back-link on it is no
+        # evidence about the candidate. Only trust a page that stayed on the candidate's registrable domain.
+        if registrable_domain(host_of(final_url)) != candidate:
+            self.log.info("cross_referencer.offsite_redirect", candidate=candidate, final=final_url)
+            return
+
         hits = sorted(linked_sites(html[:MAX_CHARS], final_url) & home)
         if not hits:
             return

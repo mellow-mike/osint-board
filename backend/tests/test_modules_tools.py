@@ -135,6 +135,14 @@ def test_scope_authorizes_a_url_target_by_its_host():
     assert not scope.permits_active(EntityRef(EntityType.URL, "https://evil.test/x"))
 
 
+def test_scope_authorizes_a_subnet_of_a_scoped_supernet():
+    scope = Scope(allow_active=True, targets=["10.0.0.0/8"])
+    assert scope.permits_active(EntityRef(EntityType.IP, "10.2.3.4"))
+    assert scope.permits_active(EntityRef(EntityType.NETBLOCK, "10.1.0.0/16"))  # a subnet of the scoped supernet
+    assert not scope.permits_active(EntityRef(EntityType.NETBLOCK, "192.168.0.0/16"))  # out of scope
+    assert not scope.permits_active(EntityRef(EntityType.NETBLOCK, "10.0.0.0/4"))  # a supernet is not contained
+
+
 async def test_nuclei_lookup_allows_a_url_target_in_domain_scope(registry, monkeypatch):
     patch_run_tool(monkeypatch, stdout=_read("nuclei.jsonl"))
     mod = registry.instantiate("tool_nuclei", scope=Scope(allow_active=True, targets=["target.example"]))
@@ -346,6 +354,20 @@ async def test_onesixtyone_ip_target_is_positional(registry, monkeypatch):
     mod = registry.instantiate("tool_onesixtyone", scope=Scope(allow_active=True))
     [e async for e in mod.lookup(EntityRef(EntityType.IP, "192.0.2.20"))]
     assert seen["argv"][-1] == "192.0.2.20" and "-i" not in seen["argv"]
+
+
+async def test_onesixtyone_rejects_ipv6_targets(registry, monkeypatch):
+    called = False
+
+    async def _fake(*a, **k):  # noqa: ANN002, ANN003
+        nonlocal called
+        called = True
+        return subproc.ToolResult([], "", "", 0)
+
+    monkeypatch.setattr(subproc, "run_tool", _fake)
+    mod = registry.instantiate("tool_onesixtyone", scope=Scope(allow_active=True))
+    assert [e async for e in mod.lookup(EntityRef(EntityType.NETBLOCK, "2001:db8::/64"))] == []
+    assert not called  # onesixtyone/its dotted-quad parser are IPv4-only, so no scan is attempted
 
 
 # ---- cmseek (reads a JSON file from its own Result tree) ---------------------------------------------------------

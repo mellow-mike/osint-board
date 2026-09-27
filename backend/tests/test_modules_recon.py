@@ -714,3 +714,16 @@ async def test_cross_referencer_no_self_loop_domain_for_an_apex_target(registry,
     emits = [e async for e in mod.lookup(EntityRef(EntityType.DOMAIN, "acme-holdings.net"))]
     # the affiliate is recorded, but the apex target is not re-emitted as a domain (that would be a self-loop)
     assert [e.type for e in emits] == [EntityType.AFFILIATE_LINK]
+
+
+async def test_cross_referencer_ignores_an_offsite_redirect(registry, fixtures_dir):
+    # the candidate redirects to an unrelated site whose page links to the home site — the candidate must NOT be
+    # confirmed, because the back-link is not on the candidate's own page
+    mod = registry.instantiate("cross_referencer", scope=Scope(), config={"targets": ["example.com"]})
+    html = (fixtures_dir / "web" / "cross_referencer_hit.html").read_text()
+
+    async def fake_fetch(url):
+        return "https://someone-else.test/landing", html  # final URL is off the candidate's registrable domain
+
+    mod._fetch = fake_fetch
+    assert [e async for e in mod.lookup(EntityRef(EntityType.DOMAIN, "parked-candidate.example"))] == []
