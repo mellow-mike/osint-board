@@ -150,3 +150,79 @@ async def test_fortiguard(fake_http, run_lookup, fixtures_dir):
     assert await run_lookup("fortiguard", "ip", "192.0.2.1") == []
     with pytest.raises(RuntimeError):
         await run_lookup("fortiguard", "ip", "192.0.2.2")
+
+
+# ---- custom_threat_feed: operator indicator lists (pure parse/match + inline/file feeds) ---------------------
+
+from osint_board.modules.base import Scope  # noqa: E402
+from osint_board.modules.impl.custom_threat_feed import (  # noqa: E402
+    Feed,
+    match_indicators,
+    normalize_asn,
+    parse_indicators,
+)
+
+
+def test_parse_indicators_splits_asns_from_the_rest():
+    text = "# my feed\n203.0.113.7\n10.0.0.0/24\nevil.example\nAS64500\nasn65001\n"
+    indicators, asns = parse_indicators(text)
+    assert "203.0.113.7" in indicators.ips and "evil.example" in indicators.hosts
+    assert [str(n) for n in indicators.networks] == ["10.0.0.0/24"]
+    assert asns == {"64500", "65001"}
+    assert not any(h.startswith("as") for h in indicators.hosts)  # ASNs are not left among the hosts
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("AS15169", "15169"), ("asn15169", "15169"), ("15169", "15169"), ("ASfoo", None), ("", None)],
+)
+def test_normalize_asn(value, expected):
+    assert normalize_asn(value) == expected
+
+
+def test_match_indicators_covers_every_target_type():
+    indicators, asns = parse_indicators("203.0.113.7\n10.0.0.0/24\nevil.example\nAS64500\n")
+    feed = Feed(name="f", indicators=indicators, asns=asns)
+    assert match_indicators(feed, EntityType.IP, "203.0.113.7")  # exact ip
+    assert match_indicators(feed, EntityType.IP, "10.0.0.9")  # inside a listed CIDR
+    assert match_indicators(feed, EntityType.HOSTNAME, "mail.evil.example")  # parent host
+    assert match_indicators(feed, EntityType.ASN, "AS64500")  # autonomous system
+    assert match_indicators(feed, EntityType.DOMAIN, "clean.example") == []
+
+
+async def test_custom_threat_feed_flags_configured_indicators(registry):
+    cfg = {
+        "feeds": [
+            {
+                "name": "soc-blocklist",
+                "category": "malware",
+                "indicators": ["203.0.113.7", "evil.example", "AS64500", "10.0.0.0/24"],
+            }
+        ]
+    }
+
+    async def flags(etype, value):
+        mod = registry.instantiate("custom_threat_feed", scope=Scope(), config=cfg)
+        return [e async for e in mod.lookup(EntityRef(etype, value))]
+
+    hit = await flags(EntityType.IP, "203.0.113.7")
+    assert len(hit) == 1 and hit[0].type is EntityType.VERDICT
+    assert hit[0].meta["feed"] == "soc-blocklist" and hit[0].meta["category"] == "malware"
+
+    assert await flags(EntityType.ASN, "AS64500")  # ASN match
+    assert await flags(EntityType.IP, "10.0.0.42")  # CIDR member
+    assert await flags(EntityType.DOMAIN, "clean.example") == []  # not listed
+
+
+async def test_custom_threat_feed_reads_a_local_file_and_honours_confidence(registry, tmp_path):
+    feed_file = tmp_path / "indicators.txt"
+    feed_file.write_text("# partner feed\nbad.example\n", encoding="utf-8")
+    cfg = {"feeds": [{"name": "partner", "path": str(feed_file), "confidence": 0.8}]}
+    mod = registry.instantiate("custom_threat_feed", scope=Scope(), config=cfg)
+    emits = [e async for e in mod.lookup(EntityRef(EntityType.DOMAIN, "bad.example"))]
+    assert len(emits) == 1 and emits[0].confidence == 0.8
+
+
+async def test_custom_threat_feed_quiet_without_configuration(registry):
+    mod = registry.instantiate("custom_threat_feed", scope=Scope())
+    assert [e async for e in mod.lookup(EntityRef(EntityType.IP, "203.0.113.7"))] == []

@@ -65,8 +65,30 @@ implemented too and, reading only public DNS or content another module collected
 (a pure dnstwist-compatible permutation engine that resolves the look-alikes to report the registered ones),
 `page_info` (form / password / upload / redirect / embed analysis of a page's markup) and `strange_headers`
 (non-standard response headers, flagging the ones that leak an internal host, address or version) — each with a
-pure analyser exercised offline against a fixture. The remaining internal lookups (`ssl_analyzer`,
-`file_metadata`, `tld_searcher`, `dns_srv`, `account_finder` …) and the 13 external tools are next.
+pure analyser exercised offline against a fixture. The next tranche of internal lookups is now implemented and
+tested the same way — a pure parser/analyser per module, no network in tests, nothing authorisation-gated
+because each reads only public DNS, the target's own certificate, or the operator's own data:
+
+- `dns_srv` (well-known `_service._proto` SRV discovery — SIP/XMPP, mail, LDAP/Kerberos and the Active-Directory
+  `_msdcs` set …, reporting each record, its target host and that host's addresses);
+- `tld_searcher` (the target's registrable name across the live IANA TLD list, with a built-in fallback list);
+- `dns_lookaside` (reverse-DNS of the addresses adjacent to the target, staying inside its `/24` or `/64`, and
+  flagging neighbours that share the target's own reverse-DNS domain);
+- `ssl_analyzer` (the certificate a host presents — subject/issuer/validity/serial, every SAN as a related host,
+  and the problems: expired, not-yet-valid, expiring soon, self-signed, over-long validity, name mismatch —
+  parsed with the standard library, no `cryptography` dependency);
+- `custom_threat_feed` (the operator's own indicator lists — inline, file or URL, plain-text or CSV — matched
+  against IPs/CIDRs/ASNs/domains/hosts and emitted as `threat`-layer verdicts);
+- `account_finder` (a username, or an e-mail's local part, checked across a Sherlock/Maigret-compatible site
+  manifest — a built-in set of common sites, or a full `data.json` supplied by config);
+- `file_metadata` (EXIF/TIFF and PDF `/Info` metadata parsed straight from the bytes — author → `person`,
+  camera/app/producer → `software`, capture/creation time → `timestamp`, and a photo's GPS tags → an
+  *exact*-precision `geo_point` on the media layer; no exiftool or image library needed).
+
+Still open in phase 2: three internal web-recon lookups (`cross_referencer`, `interesting_files`, `junk_files`),
+`adblock_check` (an EasyList/EasyPrivacy filter-list matcher), and the 13 external tools in the `tools` worker
+image (nmap, nuclei, testssl, WhatWeb, WAFW00F, CMSeeK, Retire.js, TruffleHog, dnstwist, nbtscan, onesixtyone,
+snallygaster).
 
 ### The 24-hour soak is a soft gate
 

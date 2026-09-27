@@ -289,3 +289,177 @@ async def test_gleif(fake_http, run_lookup):
         and EntityType.LEI not in by
         and emits[0].meta["status"] == "ACTIVE"
     )
+
+
+# ---- file_metadata: EXIF/TIFF/PDF metadata (pure parsers over hand-built bytes) ------------------------------
+
+import struct  # noqa: E402
+from datetime import datetime  # noqa: E402
+
+from osint_board.modules.base import Scope  # noqa: E402
+from osint_board.modules.impl.file_metadata import (  # noqa: E402
+    detect_type,
+    extract_metadata,
+    jpeg_exif_block,
+    parse_exif,
+    parse_pdf_date,
+    parse_pdf_info,
+)
+from osint_board.modules.types import EntityRef as _Ref  # noqa: E402
+
+
+def _payload(typ, values):
+    if typ == 2:  # ASCII
+        b = values.encode("latin-1") + b"\x00"
+        return len(b), b
+    if typ == 1:  # BYTE
+        return len(values), bytes(values)
+    if typ == 3:  # SHORT
+        return len(values), struct.pack(f"<{len(values)}H", *values)
+    if typ == 4:  # LONG
+        return len(values), struct.pack(f"<{len(values)}I", *values)
+    if typ == 5:  # RATIONAL
+        return len(values), b"".join(struct.pack("<II", n, d) for n, d in values)
+    raise AssertionError(typ)
+
+
+def _build_ifd(entries, overflow_base, overflow):
+    out = struct.pack("<H", len(entries))
+    for tag, typ, values in entries:
+        count, payload = _payload(typ, values)
+        if len(payload) <= 4:
+            field = payload + b"\x00" * (4 - len(payload))
+        else:
+            field = struct.pack("<I", overflow_base + len(overflow))
+            overflow += payload + (b"\x00" if len(payload) % 2 else b"")
+        out += struct.pack("<HHI", tag, typ, count) + field
+    return out + struct.pack("<I", 0)  # no next IFD
+
+
+def _build_tiff(ifd0, exif=None, gps=None):
+    n0 = len(ifd0) + (1 if exif else 0) + (1 if gps else 0)
+    ifd0_size = 2 + 12 * n0 + 4
+    exif_off = 8 + ifd0_size
+    exif_size = (2 + 12 * len(exif) + 4) if exif else 0
+    gps_off = exif_off + exif_size if exif else 8 + ifd0_size
+    gps_size = (2 + 12 * len(gps) + 4) if gps else 0
+    overflow_base = gps_off + gps_size
+
+    ifd0 = list(ifd0)
+    if exif is not None:
+        ifd0.append((0x8769, 4, [exif_off]))
+    if gps is not None:
+        ifd0.append((0x8825, 4, [gps_off]))
+
+    overflow = bytearray()
+    body = _build_ifd(ifd0, overflow_base, overflow)
+    if exif is not None:
+        body += _build_ifd(exif, overflow_base, overflow)
+    if gps is not None:
+        body += _build_ifd(gps, overflow_base, overflow)
+    return b"II" + struct.pack("<HI", 0x2A, 8) + body + bytes(overflow)
+
+
+def _sample_jpeg():
+    tiff = _build_tiff(
+        ifd0=[
+            (0x010F, 2, "ACME"),
+            (0x0110, 2, "CoolCam"),
+            (0x0131, 2, "OSINT 1.0"),
+            (0x013B, 2, "Alice Ex"),
+            (0x0132, 2, "2021:06:15 14:30:00"),
+        ],
+        exif=[(0x9003, 2, "2021:06:15 14:29:59")],
+        gps=[
+            (0x0001, 2, "N"),
+            (0x0002, 5, [(51, 1), (30, 1), (0, 1)]),
+            (0x0003, 2, "W"),
+            (0x0004, 5, [(0, 1), (7, 1), (30, 1)]),
+            (0x0005, 1, [0]),
+            (0x0006, 5, [(100, 1)]),
+        ],
+    )
+    app1 = b"Exif\x00\x00" + tiff
+    return b"\xff\xd8" + b"\xff\xe1" + struct.pack(">H", len(app1) + 2) + app1 + b"\xff\xd9"
+
+
+def test_detect_type():
+    assert detect_type(_sample_jpeg()) == "jpeg"
+    assert detect_type(b"%PDF-1.7\n...") == "pdf"
+    assert detect_type(b"II\x2a\x00rest") == "tiff"
+    assert detect_type(b"nonsense") == "unknown"
+
+
+def test_parse_exif_reads_camera_author_time_and_gps():
+    exif = parse_exif(jpeg_exif_block(_sample_jpeg()))
+    assert exif["make"] == "ACME" and exif["model"] == "CoolCam" and exif["software"] == "OSINT 1.0"
+    assert exif["artist"] == "Alice Ex" and exif["datetime_original"] == "2021:06:15 14:29:59"
+    lat, lon, alt = exif["gps"]
+    assert round(lat, 4) == 51.5 and round(lon, 4) == -0.125 and alt == 100.0  # W longitude is negative
+
+
+def test_parse_exif_is_defensive_about_junk():
+    assert parse_exif(b"") == {} and parse_exif(b"II\x2a\x00\xff\xff\xff\xff") == {}
+    assert jpeg_exif_block(b"not a jpeg") is None
+
+
+def test_extract_metadata_from_jpeg_collects_entities():
+    meta = extract_metadata(_sample_jpeg())
+    assert meta.file_type == "jpeg"
+    assert "ACME CoolCam" in meta.software and "OSINT 1.0" in meta.software
+    assert meta.people == ["Alice Ex"] and meta.gps[0] == 51.5
+    assert meta.timestamps and meta.timestamps[0][1] == datetime(2021, 6, 15, 14, 29, 59)
+
+
+def test_parse_pdf_date():
+    from datetime import UTC, timedelta, timezone
+
+    aware = parse_pdf_date("D:20210615143000+02'00'")
+    assert aware == datetime(2021, 6, 15, 14, 30, tzinfo=timezone(timedelta(hours=2)))
+    assert aware.utcoffset() == timedelta(hours=2)  # offset preserved: the real instant is 12:30 UTC
+    assert parse_pdf_date("D:20210615143000Z") == datetime(2021, 6, 15, 14, 30, tzinfo=UTC)
+    assert parse_pdf_date("D:2021") == datetime(2021, 1, 1, 0, 0, 0)  # naive when no offset is given
+    assert parse_pdf_date("junk") is None
+
+
+def test_parse_pdf_info_reads_literal_and_hex_strings():
+    pdf = (
+        b"%PDF-1.7\n1 0 obj<</Author (Jane Doe)/Producer (LibreOffice 7.5)"
+        b"/Creator (Writer)/CreationDate (D:20210615143000)"
+        b"/Title <feff0054004b>>>\nendobj\n"
+    )
+    info = parse_pdf_info(pdf)
+    assert info["author"] == "Jane Doe" and info["producer"] == "LibreOffice 7.5"
+    assert info["title"] == "TK"  # UTF-16BE hex string
+    meta = extract_metadata(pdf)
+    assert meta.people == ["Jane Doe"] and "LibreOffice 7.5" in meta.software
+    assert meta.timestamps[0][1] == datetime(2021, 6, 15, 14, 30, 0)
+
+
+async def test_file_metadata_lookup_over_inline_bytes(registry):
+    mod = registry.instantiate("file_metadata", scope=Scope())
+    target = _Ref(EntityType.RAW_FILE, "photo.jpg", meta={"text": _sample_jpeg().decode("latin-1")})
+    emits = [e async for e in mod.lookup(target)]
+    by_type = {}
+    for e in emits:
+        by_type.setdefault(e.type, []).append(e)
+
+    (point,) = by_type[EntityType.GEO_POINT]
+    assert point.geo.precision == "exact" and point.layer == "media" and round(point.geo.lat, 4) == 51.5
+    assert {e.value for e in by_type[EntityType.PERSON]} == {"Alice Ex"}
+    assert "ACME CoolCam" in {e.value for e in by_type[EntityType.SOFTWARE]}
+    assert by_type[EntityType.TIMESTAMP][0].observed_at == datetime(2021, 6, 15, 14, 29, 59)
+
+
+async def test_file_metadata_lookup_fetches_a_url(registry, fake_http):
+    fake_http.route("files.example/photo.jpg", body=_sample_jpeg())
+    mod = registry.instantiate("file_metadata", scope=Scope())
+    emits = [e async for e in mod.lookup(_Ref(EntityType.RAW_FILE, "https://files.example/photo.jpg"))]
+    assert any(e.type is EntityType.GEO_POINT for e in emits)
+
+
+async def test_file_metadata_quiet_when_there_is_nothing_to_read(registry):
+    mod = registry.instantiate("file_metadata", scope=Scope())
+    # a decoded blob (no bytes, no fetchable URL) and an unknown file type both yield nothing
+    assert [e async for e in mod.lookup(_Ref(EntityType.RAW_FILE, "base64:beef"))] == []
+    assert [e async for e in mod.lookup(_Ref(EntityType.RAW_FILE, "x", meta={"text": "plain text, no exif"}))] == []
