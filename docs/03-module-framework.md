@@ -154,6 +154,9 @@ nameserver), `run_lookup` and `run_poll` (instantiate a module from the registry
 | `dns_axfr` | lookup (active) | Zone transfer with the socket call isolated (`asyncio.to_thread`) and the zone parsing pure |
 | `port_scanner` | lookup (active) | Bounded async TCP connect scan, `asyncio.open_connection` mocked in tests |
 | `subdomain_takeover` | lookup (internal) | DNS + third-party fingerprint match; a passive check that still produces a `vulnerability` |
+| `dns_srv` | lookup (internal) | Brute-forcing well-known `_service._proto` SRV names; pure name/rdata parsing, resolves each target |
+| `ssl_analyzer` | lookup (internal) | TLS certificate analysis over the stdlib `ssl` dict (no `cryptography` dep); network fetch isolated for offline tests |
+| `file_metadata` | lookup (internal) | Hand-rolled EXIF/TIFF + PDF `/Info` parsing straight from bytes; GPS tags become exact-precision media-layer points |
 
 ## Retired upstreams
 

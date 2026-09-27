@@ -332,3 +332,294 @@ async def test_strange_headers_lookup_emits_only_for_odd_headers(registry):
         EntityType.HTTP_HEADER, "Content-Type: text/html", meta={"name": "content-type", "value": "text/html"}
     )
     assert [e async for e in mod.lookup(normal)] == []
+
+
+# ---- dns_srv: SRV service discovery (pure name/rdata parsing + fake_dns lookup) ------------------------------
+
+from osint_board.modules.impl.dns_srv import COMMON_SRV, parse_srv, srv_names  # noqa: E402
+
+
+def test_srv_names_are_fully_qualified_and_deduped():
+    names = srv_names("Example.com", services=("_sip._tcp", "_sip._tcp", "_ldap._tcp.dc._msdcs"))
+    assert names == ["_sip._tcp.example.com", "_ldap._tcp.dc._msdcs.example.com"]  # deduped, lower-cased
+    assert srv_names("https://example.com/path")[0].endswith(".example.com")  # host_of a URL target
+
+
+def test_parse_srv_reads_priority_weight_port_target():
+    rec = parse_srv("10 60 5060 sip.example.com.")
+    assert (rec.priority, rec.weight, rec.port, rec.target) == (10, 60, 5060, "sip.example.com")
+
+
+@pytest.mark.parametrize(
+    "rdata",
+    ["0 0 0 .", "10 60 5060", "a b c d", "10 60 99999 host.example.com", "10 60 -1 host.example.com"],
+)
+def test_parse_srv_rejects_malformed_and_no_service_records(rdata):
+    assert parse_srv(rdata) is None  # "." target (no such service), wrong arity, non-numeric, out-of-range port
+
+
+async def test_dns_srv_reports_records_targets_and_addresses(registry, fake_dns):
+    fake_dns.on("_sip._tcp.example.com", ["10 60 5060 sip.example.com", "20 0 5060 backup.example.com"], rtype="SRV")
+    fake_dns.on("_autodiscover._tcp.example.com", ["0 0 0 ."], rtype="SRV")  # advertised as "not offered"
+    fake_dns.on("sip.example.com", ["203.0.113.20"], rtype="A")
+    fake_dns.on("sip.example.com", ["2001:db8::20"], rtype="AAAA")
+    mod = registry.instantiate("dns_srv", scope=Scope())
+    emits = [e async for e in mod.lookup(EntityRef(EntityType.DOMAIN, "example.com"))]
+
+    records = [e for e in emits if e.type is EntityType.DNS_RECORD]
+    assert {e.meta["target"] for e in records} == {"sip.example.com", "backup.example.com"}
+    assert all(e.meta["service"] == "_sip._tcp" and e.meta["rrtype"] == "SRV" for e in records)
+    assert not any(r.meta.get("service") == "_autodiscover._tcp" for r in records)  # "." target dropped
+
+    hosts = {e.value: e for e in emits if e.type is EntityType.HOSTNAME}
+    assert set(hosts) == {"sip.example.com", "backup.example.com"}
+    assert hosts["sip.example.com"].meta["port"] == 5060 and hosts["sip.example.com"].relation == "srv_target"
+
+    # only the target that resolves contributes addresses, and each SRV target is resolved once
+    ips = {e.value for e in emits if e.type is EntityType.IP}
+    assert ips == {"203.0.113.20", "2001:db8::20"}
+
+
+async def test_dns_srv_quiet_when_nothing_is_published(registry, fake_dns):
+    mod = registry.instantiate("dns_srv", scope=Scope())
+    assert [e async for e in mod.lookup(EntityRef(EntityType.DOMAIN, "example.com"))] == []
+    assert len(COMMON_SRV) > 40  # the shipped list is substantial
+
+
+# ---- tld_searcher: same name under other TLDs (pure candidate/list parsing + fake_dns lookup) ----------------
+
+from osint_board.modules.impl.tld_searcher import parse_iana_tlds, tld_candidates  # noqa: E402
+
+
+def test_parse_iana_tlds_folds_case_and_drops_the_comment():
+    text = "# Version 2024010100\nCOM\nNET\nXN--P1AI\nnet\n"
+    assert parse_iana_tlds(text) == ["com", "net", "xn--p1ai"]  # lower-cased, comment gone, deduped
+
+
+def test_tld_candidates_skip_own_suffix_and_dedupe_case():
+    assert tld_candidates("example.com", ["net", "org", "com", "COM"]) == ["example.net", "example.org"]
+    assert tld_candidates("mail.example.co.uk", ["com", "net"]) == ["example.com", "example.net"]  # bare name
+    assert tld_candidates("example.com", ["a", "b", "c"], max_tlds=2) == ["example.a", "example.b"]
+    assert tld_candidates("bareword", ["com"]) == []  # no registrable name
+
+
+async def test_tld_searcher_reports_registered_names(registry, fake_dns):
+    fake_dns.on("example.net", ["203.0.113.30"], rtype="A")
+    fake_dns.on("example.io", ["ns1.parking.example"], rtype="NS")  # exists but parked (no address)
+    mod = registry.instantiate("tld_searcher", scope=Scope(), config={"tlds": ["net", "org", "io"]})
+    emits = [e async for e in mod.lookup(EntityRef(EntityType.DOMAIN, "example.com"))]
+    assert {e.value for e in emits} == {"example.net"}  # org is NXDOMAIN, io has no address
+    assert emits[0].type is EntityType.DOMAIN and emits[0].meta["addresses"] == ["203.0.113.30"]
+
+
+async def test_tld_searcher_include_parked_adds_ns_only_names(registry, fake_dns):
+    fake_dns.on("example.net", ["203.0.113.30"], rtype="A")
+    fake_dns.on("example.io", ["ns1.parking.example"], rtype="NS")
+    mod = registry.instantiate("tld_searcher", scope=Scope(), config={"tlds": ["net", "io"], "include_parked": True})
+    got = {e.value: e for e in [e async for e in mod.lookup(EntityRef(EntityType.DOMAIN, "example.com"))]}
+    assert set(got) == {"example.net", "example.io"}
+    assert got["example.io"].meta["parked"] is True and got["example.net"].meta["parked"] is False
+
+
+# ---- dns_lookaside: reverse-resolve neighbouring addresses (pure walk + fake_dns PTR lookup) -----------------
+
+import dns.reversename  # noqa: E402
+
+from osint_board.modules.impl.dns_lookaside import neighbor_ips  # noqa: E402
+
+
+def _rev(ip: str) -> str:
+    return dns.reversename.from_address(ip).to_text().rstrip(".")
+
+
+def test_neighbor_ips_walks_outward_and_excludes_the_target():
+    assert neighbor_ips("203.0.113.10", span=2) == ["203.0.113.9", "203.0.113.11", "203.0.113.8", "203.0.113.12"]
+    assert "203.0.113.10" not in neighbor_ips("203.0.113.10", span=5)
+
+
+def test_neighbor_ips_stays_inside_the_target_slash_24():
+    neighbors = neighbor_ips("203.0.113.1", span=3)
+    assert all(n.startswith("203.0.113.") for n in neighbors)  # never crosses into 203.0.112.x
+    assert "203.0.113.0" in neighbors  # the network address is still a real neighbour
+
+
+def test_neighbor_ips_ipv6_and_malformed():
+    assert neighbor_ips("2001:db8::10", span=1) == ["2001:db8::f", "2001:db8::11"]
+    assert neighbor_ips("not-an-ip", span=3) == []
+
+
+async def test_dns_lookaside_reports_neighbours_and_flags_related(registry, fake_dns):
+    fake_dns.on(_rev("203.0.113.10"), ["host10.example.com."], rtype="PTR")  # the target's own reverse name
+    fake_dns.on(_rev("203.0.113.9"), ["host9.example.com."], rtype="PTR")  # same domain → related
+    fake_dns.on(_rev("203.0.113.11"), ["mail.other.net."], rtype="PTR")  # different domain → not related
+    # .8 and .12 have no PTR (NXDOMAIN) and must not be reported
+    mod = registry.instantiate("dns_lookaside", scope=Scope(), config={"span": 2})
+    emits = [e async for e in mod.lookup(EntityRef(EntityType.IP, "203.0.113.10"))]
+
+    ips = {e.value: e for e in emits if e.type is EntityType.IP}
+    assert set(ips) == {"203.0.113.9", "203.0.113.11"}  # only neighbours that reverse-resolve
+    assert ips["203.0.113.9"].meta["related"] is True and ips["203.0.113.9"].meta["ptr"] == "host9.example.com"
+    assert ips["203.0.113.11"].meta["related"] is False and ips["203.0.113.11"].relation == "neighbor_of"
+
+    hosts = {e.value: e for e in emits if e.type is EntityType.HOSTNAME}
+    assert set(hosts) == {"host9.example.com", "mail.other.net"}
+    assert (
+        hosts["host9.example.com"].relation == "reverse_of" and hosts["host9.example.com"].parent.value == "203.0.113.9"
+    )
+
+
+# ---- ssl_analyzer: certificate analysis (pure over getpeercert dict) + mocked handshake ----------------------
+
+from datetime import UTC, datetime  # noqa: E402
+
+from osint_board.modules.impl.ssl_analyzer import (  # noqa: E402
+    analyze_certificate,
+    host_matches,
+    verify_error_verdict,
+)
+
+_NOW = datetime(2025, 7, 1, tzinfo=UTC)
+
+
+def _cert(
+    *,
+    subject_cn="example.com",
+    issuer_cn="R3",
+    issuer_org="Let's Encrypt",
+    not_before="May 01 00:00:00 2025 GMT",
+    not_after="Aug 01 00:00:00 2025 GMT",
+    sans=("example.com", "www.example.com"),
+    serial="03A1",
+):
+    # a self-signed cert (issuer == subject) is expressed by issuer_org=None + issuer_cn == subject_cn
+    issuer_rdns = []
+    if issuer_org is not None:
+        issuer_rdns.append((("organizationName", issuer_org),))
+    issuer_rdns.append((("commonName", issuer_cn),))
+    return {
+        "subject": ((("commonName", subject_cn),),),
+        "issuer": tuple(issuer_rdns),
+        "serialNumber": serial,
+        "notBefore": not_before,
+        "notAfter": not_after,
+        "subjectAltName": tuple(("DNS", s) for s in sans),
+    }
+
+
+@pytest.mark.parametrize(
+    ("host", "names", "ok"),
+    [
+        ("example.com", ["example.com"], True),
+        ("foo.example.com", ["*.example.com"], True),
+        ("example.com", ["*.example.com"], False),  # a wildcard does not match the bare apex
+        ("a.b.example.com", ["*.example.com"], False),  # nor two labels deep
+        ("other.com", ["example.com", "www.example.com"], False),
+    ],
+)
+def test_host_matches_rfc6125(host, names, ok):
+    assert host_matches(host, names) is ok
+
+
+def test_analyze_certificate_healthy():
+    a = analyze_certificate(_cert(), "example.com", now=_NOW)
+    assert a.issues() == [] and a.self_signed is False
+    assert a.dns_names == ["example.com", "www.example.com"] and a.issuer_org == "Let's Encrypt"
+
+
+def test_analyze_certificate_expired_and_expiring():
+    assert any(
+        c == "tls-expired"
+        for _, c in analyze_certificate(_cert(not_after="Jun 01 00:00:00 2025 GMT"), "example.com", now=_NOW).issues()
+    )
+    soon = analyze_certificate(_cert(not_after="Jul 10 00:00:00 2025 GMT"), "example.com", now=_NOW)
+    assert soon.expiring_soon and not soon.expired
+
+
+def test_analyze_certificate_self_signed_and_over_long():
+    ss = analyze_certificate(
+        _cert(subject_cn="box.local", issuer_cn="box.local", issuer_org=None, sans=("box.local",)),
+        "box.local",
+        now=_NOW,
+    )
+    assert ss.self_signed and any(c == "tls-self-signed" for _, c in ss.issues())
+    lng = analyze_certificate(
+        _cert(not_before="Jan 01 00:00:00 2023 GMT", not_after="Dec 01 00:00:00 2025 GMT"), "example.com", now=_NOW
+    )
+    assert lng.over_long
+
+
+def test_analyze_certificate_hostname_mismatch_but_not_for_ips():
+    assert analyze_certificate(_cert(sans=("example.com",)), "evil.com", now=_NOW).hostname_mismatch is True
+    assert analyze_certificate(_cert(sans=("example.com",)), "example.com", now=_NOW).hostname_mismatch is False
+    assert analyze_certificate(_cert(sans=("example.com",)), None, now=_NOW).hostname_mismatch is False
+
+
+def test_analyze_certificate_falls_back_to_cn_when_no_san():
+    a = analyze_certificate(_cert(subject_cn="legacy.example.com", sans=()), None, now=_NOW)
+    assert a.dns_names == ["legacy.example.com"]
+
+
+async def test_ssl_analyzer_lookup_emits_cert_sans_and_verdicts(registry):
+    # a long-expired self-signed cert, deterministic for any real "now"; target is one of its SANs
+    canned = _cert(
+        subject_cn="self.example.com",
+        issuer_cn="self.example.com",
+        issuer_org=None,
+        not_before="Jan 01 00:00:00 2019 GMT",
+        not_after="Jan 01 00:00:00 2020 GMT",
+        sans=("self.example.com", "www.example.com", "*.cdn.example.com"),
+    )
+    mod = registry.instantiate("ssl_analyzer", scope=Scope(), config={"port": 443})
+
+    async def fake_fetch(host, port, server_name):
+        assert (host, port, server_name) == ("self.example.com", 443, "self.example.com")
+        return canned, None  # a certificate we could parse (verification not attempted here)
+
+    mod._fetch_cert = fake_fetch
+    emits = [e async for e in mod.lookup(EntityRef(EntityType.HOSTNAME, "self.example.com"))]
+
+    certs = [e for e in emits if e.type is EntityType.CERTIFICATE]
+    assert len(certs) == 1 and certs[0].meta["self_signed"] is True and certs[0].meta["expired"] is True
+
+    sans = {e.value for e in emits if e.type is EntityType.HOSTNAME}
+    assert sans == {"www.example.com"}  # the wildcard SAN and the target's own name are not re-emitted
+
+    labels = {e.meta["label"] for e in emits if e.type is EntityType.VERDICT}
+    assert {"certificate expired", "self-signed certificate"} <= labels
+
+
+@pytest.mark.parametrize(
+    ("message", "category"),
+    [
+        ("certificate has expired", "tls-expired"),
+        ("self-signed certificate", "tls-self-signed"),
+        ("self signed certificate in certificate chain", "tls-self-signed"),
+        ("unable to get local issuer certificate", "tls-untrusted-issuer"),
+        ("something unrecognised", "tls-untrusted"),
+    ],
+)
+def test_verify_error_verdict(message, category):
+    assert verify_error_verdict(message)[1] == category
+
+
+async def test_ssl_analyzer_emits_a_verdict_for_an_untrusted_cert(registry):
+    # verification failed (no dict), but we reached a real cert: the failure reason is still a verdict
+    mod = registry.instantiate("ssl_analyzer", scope=Scope())
+
+    async def fake_fetch(host, port, server_name):
+        return None, "certificate has expired"
+
+    mod._fetch_cert = fake_fetch
+    emits = [e async for e in mod.lookup(EntityRef(EntityType.HOSTNAME, "expired.example"))]
+    assert len(emits) == 1 and emits[0].type is EntityType.VERDICT
+    assert emits[0].meta["category"] == "tls-expired" and emits[0].meta["detail"] == "certificate has expired"
+
+
+async def test_ssl_analyzer_quiet_on_handshake_failure(registry):
+    mod = registry.instantiate("ssl_analyzer", scope=Scope())
+
+    async def fake_fetch(host, port, server_name):
+        return None, None  # dead port / TLS error: nothing reached, no verdict
+
+    mod._fetch_cert = fake_fetch
+    assert [e async for e in mod.lookup(EntityRef(EntityType.IP, "203.0.113.5"))] == []

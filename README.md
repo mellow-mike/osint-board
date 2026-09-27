@@ -10,7 +10,9 @@ and colour coding. A fast, type-aware search box is the entry point to every inv
 > all 109 phase-1 modules are implemented. Phase 2 opened with the two items phase 1 left open: **live aircraft
 > with no key** (the `opensky` module answering through the in-process `adsb_network` service from the adsb.lol
 > and adsb.fi community aggregators) and a **24-hour feed soak** (`make soak`, a soft gate run after every
-> milestone). 113 modules are implemented with offline fixture tests. The remaining internal modules, external
+> milestone). 135 modules are implemented with offline fixture tests — including phase 2's internal recon
+> lookups (SRV discovery, TLD search, DNS look-aside, TLS-certificate analysis, custom threat feeds, account
+> finding across many sites, and EXIF/PDF file-metadata extraction). The remaining internal modules, external
 > tools and tiered replacements follow [docs/09-roadmap.md](docs/09-roadmap.md).
 
 ## What it does

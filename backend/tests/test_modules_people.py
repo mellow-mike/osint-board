@@ -206,3 +206,88 @@ async def test_venmo(fake_http, run_lookup, fixtures_dir):
     fake_http.route("account.venmo.com/u/changed", file="people/venmo_generic.html")
     with pytest.raises(RuntimeError, match="not recognised"):
         await run_lookup("venmo", "username", "changed")
+
+
+# ---- account_finder: username across many sites (pure detection + fake_http probing) -------------------------
+
+from osint_board.modules.base import Scope  # noqa: E402
+from osint_board.modules.impl.account_finder import (  # noqa: E402
+    BUILTIN_MANIFEST,
+    Site,
+    account_exists,
+    build_manifest,
+    profile_url,
+    username_from_target,
+)
+
+
+def test_build_manifest_reads_sherlock_fields_and_skips_non_username_entries():
+    data = {
+        "A": {"url": "https://a.test/{}", "errorType": "status_code"},
+        "B": {"url": "https://b.test/{}", "errorType": "message", "errorMsg": ["gone", "missing"]},
+        "NoPlaceholder": {"url": "https://c.test/about", "errorType": "status_code"},
+    }
+    sites = {s.name: s for s in build_manifest(data)}
+    assert set(sites) == {"A", "B"}  # the non-username probe is skipped
+    assert sites["B"].error_messages == ("gone", "missing")
+    assert build_manifest({"X": {"url": "https://x.test/{}", "errorType": "message", "errorMsg": "nope"}})[
+        0
+    ].error_messages == ("nope",)
+
+
+def test_profile_url_quotes_the_username():
+    site = Site("S", "https://s.test/{}", "status_code")
+    assert profile_url(site, "al ice") == "https://s.test/al%20ice"
+    assert profile_url(site, "user.name") == "https://s.test/user.name"
+
+
+def test_account_exists_by_status_message_and_redirect():
+    assert account_exists(Site("S", "u/{}", "status_code"), 200, "u/x", "") is True
+    assert account_exists(Site("S", "u/{}", "status_code"), 404, "u/x", "") is False
+    msg = Site("S", "u/{}", "message", error_messages=("no such user",))
+    assert account_exists(msg, 200, "u/x", "welcome home") is True
+    assert account_exists(msg, 200, "u/x", "sorry, no such user here") is False
+    redir = Site("S", "u/{}", "response_url", error_url="https://s.test/404")
+    assert account_exists(redir, 200, "https://s.test/404", "") is False
+    assert account_exists(redir, 200, "https://s.test/alice", "") is True
+
+
+def test_username_from_target_uses_email_local_part():
+    assert username_from_target(EntityRef(EntityType.EMAIL, "alice@example.com")) == ("alice", True)
+    assert username_from_target(EntityRef(EntityType.USERNAME, "alice")) == ("alice", False)
+
+
+def test_builtin_manifest_is_substantial_and_valid():
+    sites = build_manifest(BUILTIN_MANIFEST)
+    assert len(sites) > 25 and all("{}" in s.url_template for s in sites)
+
+
+_MANIFEST = {
+    "GitHub": {"url": "https://github.test/{}", "errorType": "status_code"},
+    "Nope": {"url": "https://nope.test/{}", "errorType": "status_code"},
+    "Tele": {"url": "https://tele.test/{}", "errorType": "message", "errorMsg": "no such user"},
+}
+
+
+async def test_account_finder_reports_hits_only(registry, fake_http):
+    fake_http.route("github.test", body="ok", status=200)
+    fake_http.route("nope.test", body="not found", status=404)
+    fake_http.route("tele.test", body="Welcome alice", status=200)  # message type: error string absent → exists
+    mod = registry.instantiate("account_finder", scope=Scope(), config={"manifest": _MANIFEST})
+    emits = [e async for e in mod.lookup(EntityRef(EntityType.USERNAME, "alice"))]
+
+    profiles = {e.meta["site"]: e for e in emits if e.type is EntityType.SOCIAL_PROFILE}
+    assert set(profiles) == {"GitHub", "Tele"}  # the 404 site is not reported
+    assert profiles["GitHub"].value == "https://github.test/alice" and profiles["GitHub"].relation == "profile"
+    assert profiles["GitHub"].meta["derived_from_email"] is False
+    urls = {e.value for e in emits if e.type is EntityType.URL}
+    assert urls == {"https://github.test/alice", "https://tele.test/alice"}
+
+
+async def test_account_finder_checks_email_local_part(registry, fake_http):
+    fake_http.route("github.test", body="ok", status=200)
+    mod = registry.instantiate("account_finder", scope=Scope(), config={"manifest": {"GitHub": _MANIFEST["GitHub"]}})
+    emits = [e async for e in mod.lookup(EntityRef(EntityType.EMAIL, "alice@example.com"))]
+    profiles = [e for e in emits if e.type is EntityType.SOCIAL_PROFILE]
+    assert len(profiles) == 1 and profiles[0].value == "https://github.test/alice"
+    assert profiles[0].meta["derived_from_email"] is True
