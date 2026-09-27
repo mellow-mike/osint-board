@@ -143,7 +143,8 @@ class DnsRule:
 
 
 class FakeDns:
-    """Answers ``dns.asyncresolver.Resolver.resolve`` from rules; unknown names are NXDOMAIN."""
+    """Answers ``dns.asyncresolver.Resolver.resolve`` from rules; unknown names are NXDOMAIN, and a known name asked
+    for a record type it has no rule for is NoAnswer (as real DNS answers NODATA)."""
 
     def __init__(self) -> None:
         self.rules: list[DnsRule] = []
@@ -175,6 +176,11 @@ class FakeDns:
                 if rule.raises is not None:
                     raise rule.raises(rule.message) if rule.message else rule.raises()
                 return [FakeAnswerRecord(r) for r in rule.records]
+        if any(
+            rule.name == name and rule.raises is None and (rule.nameserver is None or rule.nameserver in servers)
+            for rule in self.rules
+        ):
+            raise dns.resolver.NoAnswer  # the name exists on this resolver, just not with this type (NODATA)
         raise dns.resolver.NXDOMAIN
 
 

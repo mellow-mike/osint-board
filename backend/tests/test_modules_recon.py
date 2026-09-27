@@ -54,6 +54,25 @@ def test_permutations_of_unresolvable_input_is_empty():
     assert permutations("bareword") == []
 
 
+def test_bitsquatting_flips_every_bit_of_every_character():
+    domains = {p.domain for p in permutations("example.com")}
+    name, expected = "example", set()
+    for i, ch in enumerate(name):
+        for bit in range(8):
+            flipped = chr(ord(ch) ^ (1 << bit))
+            if flipped in "abcdefghijklmnopqrstuvwxyz0123456789-":
+                expected.add(f"{name[:i]}{flipped}{name[i + 1 :]}.com")
+    assert len(expected) > 20 and expected <= domains
+    bitsquats = {p.domain for p in permutations("example.com") if p.fuzzer == "bitsquatting"}
+    assert {"gxample.com", "mxample.com"} <= bitsquats  # 'e' ^ 0x02, 'e' ^ 0x08: no other fuzzer reaches them
+
+
+def test_tld_swaps_come_first_so_a_candidate_cap_keeps_them():
+    perms = permutations("internationalbusinessmachines.com")
+    swaps = [p for p in perms if p.fuzzer == "tld-swap"]
+    assert len(perms) > 600 and perms[: len(swaps)] == swaps
+
+
 async def test_similar_domains_reports_registered_lookalikes(registry, fake_dns):
     fake_dns.on("examples.com", ["203.0.113.9"], rtype="A")  # a resolvable look-alike (addition)
     fake_dns.on("example.net", ["ns1.parking.example"], rtype="NS")  # parked: NS only, no address
@@ -77,6 +96,33 @@ async def test_similar_domains_emit_all_includes_unregistered(registry, fake_dns
     similar = {e.value: e for e in emits if e.type is EntityType.SIMILAR_DOMAIN}
     assert "exampl.com" in similar and similar["exampl.com"].meta["registered"] is False
     assert similar["exampl.com"].confidence < similar["examples.com"].confidence
+
+
+async def test_similar_domains_stops_at_nxdomain(registry, fake_dns):
+    mod = registry.instantiate("similar_domains", scope=Scope())
+    assert [e async for e in mod.lookup(EntityRef(EntityType.DOMAIN, "example.com"))] == []
+    asked = [rtype for name, rtype, _ in fake_dns.queries if name == "exampl.com"]
+    assert asked == ["A"]  # NXDOMAIN answers for the name, so AAAA and NS are not asked
+
+
+async def test_similar_domains_does_not_call_a_failed_lookup_unregistered(registry, fake_dns):
+    import dns.exception
+
+    for rtype in ("A", "AAAA", "NS"):
+        fake_dns.on("exampl.com", rtype=rtype, raises=dns.exception.Timeout)
+    mod = registry.instantiate("similar_domains", scope=Scope(), config={"emit_all": True})
+    similar = {e.value for e in [e async for e in mod.lookup(EntityRef(EntityType.DOMAIN, "example.com"))]}
+    assert "exampl.com" not in similar and "exmple.com" in similar  # timed out: unknown, not free to register
+
+
+async def test_similar_domains_subdomain_split_pivots_on_its_registrable_domain(registry, fake_dns):
+    fake_dns.on("exa.mple.com", ["203.0.113.10"], rtype="A")
+    mod = registry.instantiate("similar_domains", scope=Scope())
+    emits = [e async for e in mod.lookup(EntityRef(EntityType.DOMAIN, "example.com"))]
+    assert {e.value: e.meta["fuzzer"] for e in emits if e.type is EntityType.SIMILAR_DOMAIN} == {
+        "exa.mple.com": "subdomain"
+    }
+    assert {e.value for e in emits if e.type is EntityType.DOMAIN} == {"mple.com"}  # not the host exa.mple.com
 
 
 # ---- page_info: analyser (pure) + lookup dispatch ------------------------------------------------------------
@@ -112,6 +158,27 @@ def test_analyze_page_flags_credentials_over_http():
     assert "insecure-credentials" in info.summary()["flags"]
 
 
+def test_analyze_page_flags_an_http_page_posting_passwords_to_https():
+    html = '<form method=post action="https://secure.example/login"><input type=password name=p></form>'
+    assert analyze_page(html, "http://insecure.example/login").insecure_password_form  # the page can be rewritten
+
+
+def test_analyze_page_sees_password_fields_outside_a_form():
+    html = "<div id=app><input type=email name=user><input type=password name=pass><button>Go</button></div>"
+    info = analyze_page(html, "http://spa.example/")
+    assert info.forms == [] and info.takes_passwords and info.has_login_form and info.insecure_password_form
+
+
+def test_analyze_page_treats_the_same_site_as_first_party():
+    html = (
+        '<form action="https://login.example.com/session"><input name=u><input type=password name=p></form>'
+        '<iframe src="https://cdn.example.com/widget"></iframe><iframe src="https://widgets.other.net/x"></iframe>'
+        '<script src="https://static.example.com/app.js"></script>'
+    )
+    info = analyze_page(html, "https://www.example.com/")
+    assert info.external_form_hosts == [] and info.frame_hosts == ["widgets.other.net"] and info.external_scripts == 0
+
+
 def test_login_form_needs_a_username_field():
     assert Form(has_password=True, inputs=["password"]).is_login is False
     assert Form(has_password=True, inputs=["text", "password"]).is_login is True
@@ -140,6 +207,28 @@ async def test_page_info_lookup_fetches_a_url(registry, fake_http, fixtures_dir)
     assert len(emits) == 1 and emits[0].meta["has_login_form"] is True
 
 
+async def test_page_info_fetches_raw_content_that_arrives_without_its_text(registry, fake_http, fixtures_dir):
+    # the API and CLI hand a lookup only (type, value); a spider page's value is its URL
+    fake_http.route(
+        "site.example/login",
+        body=(fixtures_dir / "web" / "page_info_login.html").read_text(),
+        headers={"content-type": "text/html"},
+    )
+    mod = registry.instantiate("page_info", scope=Scope())
+    emits = [e async for e in mod.lookup(EntityRef(EntityType.RAW_CONTENT, "https://site.example/login"))]
+    assert len(emits) == 1 and emits[0].meta["has_login_form"] is True
+
+    blob = EntityRef(EntityType.RAW_CONTENT, "base64:3f2a")  # decoded content: nothing to fetch
+    assert [e async for e in mod.lookup(blob)] == []
+    assert len(fake_http.calls) == 1
+
+
+async def test_page_info_skips_server_error_pages(registry, fake_http):
+    fake_http.route("site.example", body="<h1>502 Bad Gateway</h1>", status=502, headers={"content-type": "text/html"})
+    mod = registry.instantiate("page_info", scope=Scope())
+    assert [e async for e in mod.lookup(EntityRef(EntityType.URL, "https://site.example/"))] == []
+
+
 # ---- strange_headers: classifier (pure) + lookup ------------------------------------------------------------
 
 
@@ -160,6 +249,22 @@ def test_is_standard_knows_the_registered_field_set():
         ("X-Powered-By", "PHP/8.1.2", "information-leak", True),
         ("X-Served-By", "cache-lax-1", "backend-fingerprint", True),
         ("X-Cache", "HIT", "backend-fingerprint", False),
+        ("Public-Key-Pins", 'pin-sha256="abc"; max-age=10', None, None),  # registered, just rare
+        # addresses anywhere in the value, not only as a whole token
+        ("X-Origin", "for=10.1.2.3;proto=https", "information-leak", True),
+        ("X-Origin", "[fd00::1]:8443", "information-leak", True),
+        # whole words: a device header is not a "dev" switch, nor a build header a "test" one
+        ("X-Device-Type", "desktop", "custom", False),
+        ("X-Latest-Build", "yes", "custom", False),
+        ("X-MiniProfiler-Ids", '["a1"]', "debug", True),
+        # tracing / correlation ids name a request, they are not debug output
+        ("X-Amzn-Trace-Id", "Root=1-5f84c7a9-0123456789abcdef01234567", "backend-fingerprint", False),
+        ("Traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", "backend-fingerprint", False),
+        # a timing or a rate is not a software version; a product/version or a version header is
+        ("X-Response-Time", "0.123", "custom", False),
+        ("X-Ratelimit-Reset", "1695812345.5", "custom", False),
+        ("X-AspNet-Version", "4.0.30319", "information-leak", True),
+        ("X-AspNetMvc-Version", "5.2", "information-leak", True),
     ],
 )
 def test_classify_header(name, value, category, leak):
@@ -189,6 +294,12 @@ async def test_strange_headers_lookup_emits_only_for_odd_headers(registry):
     e = emits[0]
     assert e.type is EntityType.HTTP_HEADER and e.meta["category"] == "information-leak"
     assert e.meta["info_leak"] is True and e.meta["host"] == "site.example"
+    # the header itself is annotated: same entity, no header --exposes--> header self-loop
+    assert e.value == strange.value and e.relation is None
+
+    # an API run passes only the value; the spider's host / url must not be overwritten with nulls
+    (bare,) = [e async for e in mod.lookup(EntityRef(EntityType.HTTP_HEADER, "X-Backend-Server: web03.internal"))]
+    assert bare.meta["category"] == "information-leak" and "host" not in bare.meta and "url" not in bare.meta
 
     normal = EntityRef(
         EntityType.HTTP_HEADER, "Content-Type: text/html", meta={"name": "content-type", "value": "text/html"}

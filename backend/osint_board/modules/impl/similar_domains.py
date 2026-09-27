@@ -5,12 +5,13 @@ Consumes: domain
 Produces: similar_domain, domain
 
 A dnstwist-compatible permutation engine expands the target's registrable name into the look-alikes an attacker
-would register — additions, omissions, repetitions, transpositions, keyboard-adjacent replacements and
-insertions, bitsquats, homoglyphs, hyphenation, vowel swaps, a doubled/plural name and the same name under other
-TLDs. The permutation engine (:func:`permutations`) is pure. The lookup then resolves each candidate through the
-system resolver and reports the ones that exist (an ``A``/``AAAA`` record, or an ``NS`` delegation for a parked
-name): reading public DNS for third-party names is passive, so the module is not authorisation-gated. Set
-``emit_all: true`` to also surface unregistered candidates (e.g. for defensive pre-registration).
+would register — the same name under other TLDs, additions, omissions, repetitions, transpositions,
+keyboard-adjacent replacements and insertions, bitsquats, homoglyphs, hyphenation, subdomain splits and vowel
+swaps. The permutation engine (:func:`permutations`) is pure. The lookup then resolves each candidate through the
+system resolver and reports the ones that exist (an ``A``/``AAAA`` record, or a name that exists without one — a
+parked ``NS``-only delegation): reading public DNS for third-party names is passive, so the module is not
+authorisation-gated. Set ``emit_all: true`` to also surface the candidates DNS says do not exist (``NXDOMAIN``,
+e.g. for defensive pre-registration); a candidate whose lookup failed is never reported as unregistered.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ import tldextract
 from osint_board.entities.types import EntityType
 from osint_board.modules.base import LookupModule
 from osint_board.modules.dnsutil import make_resolver, query
-from osint_board.modules.helpers import host_of
+from osint_board.modules.helpers import host_of, registrable_domain
 from osint_board.modules.registry import module
 from osint_board.modules.types import Emit, EntityRef
 
@@ -35,7 +36,7 @@ _KEYBOARD: dict[str, str] = {
     "1": "2q", "2": "1qw3", "3": "2we4", "4": "3er5", "5": "4rt6", "6": "5ty7", "7": "6yu8", "8": "7ui9",
     "9": "8io0", "0": "9op",
     "q": "12wa", "w": "3qeasd2", "e": "4wrsdf3", "r": "5etdfg4", "t": "6ryfgh5", "y": "7tughj6", "u": "8yihjk7",
-    "i": "9uojkl8", "o": "0ipkl9", "p": "olo0",
+    "i": "9uojkl8", "o": "0ipkl9", "p": "lo0",
     "a": "qwsz", "s": "edxzaw", "d": "rfcxse", "f": "tgvcdr", "g": "yhbvft", "h": "ujnbgy", "j": "ikmnhu",
     "k": "olmji", "l": "kop",
     "z": "asx", "x": "zsdc", "c": "xdfv", "v": "cfgb", "b": "vghn", "n": "bhjm", "m": "njk",
@@ -105,15 +106,11 @@ def _label_fuzzers(name: str) -> Iterator[tuple[str, str]]:
         for glyph in _HOMOGLYPHS.get(ch, ()):
             yield "homoglyph", name[:i] + glyph + name[i + 1 :]
 
-    for i in range(len(name.encode())):  # bitsquatting: a single flipped bit in the byte stream
-        byte = name.encode()
-        flipped = byte[i] ^ (1 << (i % 7))  # low 7 bits keep us in ASCII
-        try:
-            ch = bytes([flipped]).decode("ascii")
-        except UnicodeDecodeError:
-            continue
-        if ch in _LDH:
-            yield "bitsquatting", name[:i] + ch + name[i + 1 :]
+    for i, ch in enumerate(name):  # bitsquatting: every single-bit flip of every character that stays LDH
+        for bit in range(8):
+            flipped = chr(ord(ch) ^ (1 << bit))
+            if flipped in _LDH:
+                yield "bitsquatting", name[:i] + flipped + name[i + 1 :]
 
     for i in range(1, n):  # hyphenation and subdomain split between characters
         yield "hyphenation", name[:i] + "-" + name[i:]
@@ -138,7 +135,8 @@ def permutations(domain: str, *, tlds: Iterable[str] = _COMMON_TLDS) -> list[Per
     """Every distinct look-alike of ``domain``'s registrable name, plus the same name under other TLDs.
 
     The input domain itself is never returned. Candidates are deduplicated across fuzzers (the first fuzzer to
-    reach a given domain keeps it), in a stable order.
+    reach a given domain keeps it), in a stable order. TLD swaps — the handful of candidates most often registered —
+    come first, so a ``max_candidates`` cap on a long name trims label mutations rather than them.
     """
     split = split_domain(domain)
     if split is None:
@@ -159,12 +157,12 @@ def permutations(domain: str, *, tlds: Iterable[str] = _COMMON_TLDS) -> list[Per
         seen.add(fqdn)
         out.append(Permutation(fuzzer, fqdn))
 
-    for fuzzer, permuted in _label_fuzzers(name):
-        add(fuzzer, permuted, suffix)
-
     for tld in tlds:  # same name, different suffix
         if tld != suffix:
             add("tld-swap", name, tld)
+
+    for fuzzer, permuted in _label_fuzzers(name):
+        add(fuzzer, permuted, suffix)
 
     return out
 
@@ -173,16 +171,29 @@ def permutations(domain: str, *, tlds: Iterable[str] = _COMMON_TLDS) -> list[Per
 class SimilarDomains(LookupModule):
     rate_per_sec = 20.0
 
-    async def _registered(self, resolver, domain: str) -> tuple[bool, tuple[str, ...]]:  # noqa: ANN001
-        """A domain exists if it has an address, or a nameserver delegation (parked names have only ``NS``)."""
-        for rtype in ("A", "AAAA"):
-            answer = await query(resolver, domain, rtype)
-            if answer.ok and answer.records:
-                return True, answer.records
+    async def _resolve(self, resolver, domain: str) -> tuple[bool | None, tuple[str, ...]]:  # noqa: ANN001
+        """``(registered, addresses)`` for one candidate; ``registered`` is ``None`` when DNS gave no usable answer.
+
+        ``NXDOMAIN`` is an answer about the name, not the record type (RFC 8020), so it settles the candidate after
+        one query — most candidates end there. A name that exists without an address (``NODATA``, or only an ``NS``
+        delegation) is a parked registration.
+        """
+        a = await query(resolver, domain, "A")
+        if a.status == "nxdomain":
+            return False, ()
+        if a.ok and a.records:
+            return True, a.records
+        aaaa = await query(resolver, domain, "AAAA")
+        if aaaa.ok and aaaa.records:
+            return True, aaaa.records
+        if aaaa.status == "nxdomain":
+            return False, ()
+        if "noanswer" in (a.status, aaaa.status):
+            return True, ()
         ns = await query(resolver, domain, "NS")
         if ns.ok and ns.records:
             return True, ()
-        return False, ()
+        return (False, ()) if ns.status == "nxdomain" else (None, ())
 
     async def lookup(self, target: EntityRef) -> AsyncIterator[Emit]:
         cfg = self.ctx.config
@@ -197,13 +208,17 @@ class SimilarDomains(LookupModule):
         resolver = make_resolver(cfg.get("nameservers"))
         sem = asyncio.Semaphore(concurrency)
 
-        async def resolve(perm: Permutation) -> tuple[Permutation, bool, tuple[str, ...]]:
+        async def resolve(perm: Permutation) -> tuple[Permutation, bool | None, tuple[str, ...]]:
             async with sem:
-                registered, ips = await self._registered(resolver, perm.domain)
+                registered, ips = await self._resolve(resolver, perm.domain)
             return perm, registered, ips
 
+        unresolved = 0
         for coro in asyncio.as_completed([resolve(p) for p in candidates]):
             perm, registered, ips = await coro
+            if registered is None:  # a timeout or SERVFAIL says nothing either way
+                unresolved += 1
+                continue
             if not registered and not emit_all:
                 continue
             yield Emit(
@@ -223,9 +238,11 @@ class SimilarDomains(LookupModule):
             if registered and ips:  # a resolvable look-alike is also a domain worth pivoting on
                 yield Emit(
                     EntityType.DOMAIN,
-                    perm.domain,
+                    registrable_domain(perm.domain),  # a subdomain split (exa.mple.com) pivots on mple.com
                     confidence=0.9,
                     relation="looks_like",
                     parent=target,
                     meta={"fuzzer": perm.fuzzer, "via": "similar_domains"},
                 )
+        if unresolved:
+            self.log.info("similar_domains.unresolved", target=host_of(target), candidates=unresolved)

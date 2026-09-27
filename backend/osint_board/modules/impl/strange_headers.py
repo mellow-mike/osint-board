@@ -7,9 +7,10 @@ Produces: http_header
 The web spider emits one ``http_header`` per non-volatile response header. Most are boring and standard; this
 module keeps the ones that are *not* in the registered HTTP field set and classifies them — a plain custom
 ``X-…`` header, a backend/CDN fingerprint, a debug switch, or an information leak when the value exposes an
-internal hostname, a private address or a software version. Classification (:func:`classify_header`) is pure, so
-it is tested offline. The module reads only headers another module already collected — it makes no request of its
-own — so it is passive and not authorisation-gated.
+internal hostname, a private address or a software version. The finding is written onto the header entity itself
+(its ``category`` / ``info_leak`` / ``reason`` meta). Classification (:func:`classify_header`) is pure, so it is
+tested offline. The module reads only headers another module already collected — it makes no request of its own —
+so it is passive and not authorisation-gated.
 """
 
 from __future__ import annotations
@@ -102,13 +103,41 @@ STANDARD_HEADERS: frozenset[str] = frozenset(
         "accept-encoding",
         "sourcemap",
         "x-sourcemap",
+        # registered in the IANA field-name registry, rarer
+        "authentication-info",
+        "proxy-authentication-info",
+        "content-digest",
+        "repr-digest",
+        "digest",
+        "priority",
+        "public-key-pins",
+        "public-key-pins-report-only",
+        "refresh",
+        "service-worker-allowed",
+        "cross-origin-embedder-policy-report-only",
+        "cross-origin-opener-policy-report-only",
+        "document-policy",
+        "critical-ch",
+        "sec-websocket-accept",
+        "sec-websocket-extensions",
+        "sec-websocket-protocol",
+        "sec-websocket-version",
     }
 )
 
-#: Header-name substrings that mark a value as diagnostic/debug output.
-_DEBUG_TOKENS = ("debug", "trace", "dev", "test", "diagnostic", "stack", "profiler", "query-log")
+#: Header-name words (``-``/``_``-separated) that mark a header as diagnostic/debug output. Whole words, so
+#: ``X-Device-Type`` is not a "dev" header and ``X-Latest-Build`` not a "test" one.
+_DEBUG_TOKENS = ("trace", "dev", "test", "diagnostic", "diagnostics", "stack", "query-log")
+#: Name fragments that are debug tooling wherever they appear (``X-MiniProfiler-Ids``, ``X-Debugbar-Id``).
+_DEBUG_FRAGMENTS = ("debug", "profiler")
 
-#: Header names/prefixes that fingerprint the backend, cache or routing tier.
+#: Distributed-tracing / request-correlation ids (W3C Trace Context, AWS X-Ray, B3, Google Cloud Trace). They name
+#: a request, not a debug switch: the tracing stack is a backend fingerprint, the id itself leaks nothing.
+_TRACE_ID_RE = re.compile(
+    r"^(?:traceparent|tracestate|x-cloud-trace-context|x-b3-[\w-]+|b3)$|(?:^|-)(?:trace|span|request|correlation)-?ids?$"
+)
+
+#: Header-name words that fingerprint the backend, cache or routing tier.
 _BACKEND_TOKENS = (
     "backend",
     "upstream",
@@ -131,7 +160,13 @@ _BACKEND_TOKENS = (
     "region",
 )
 
-_VERSION_RE = re.compile(r"\b\d+\.\d+(?:\.\d+)*\b")
+#: A software version: a product token followed by ``/1.2`` or `` 1.2`` (``PHP/8.1.2``, ``Apache 2.4``), or a bare
+#: version of three or more parts (``4.0.30319``). A bare ``0.123`` is a timing or a rate, not a version.
+_PRODUCT_VERSION_RE = re.compile(r"[A-Za-z][\w.+-]*[/ ]v?\d+(?:\.\d+)+\b")
+_BARE_VERSION_RE = re.compile(r"\b\d+(?:\.\d+){2,}\b")
+#: A version-named header (``X-AspNetMvc-Version: 5.2``) needs no product token in its value.
+_VERSION_NUMBER_RE = re.compile(r"\bv?\d+(?:\.\d+)+\b")
+_IPV4_RE = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
 _INTERNAL_HOST_RE = re.compile(r"\b[\w-]+\.(?:local|internal|lan|corp|intranet|home|localdomain)\b", re.I)
 _HOSTNAMEY_RE = re.compile(r"\b(?:srv|host|node|web|app|db|cache|lb|edge|pod)[\w-]*\d+[\w.-]*\b", re.I)
 
@@ -148,15 +183,36 @@ def is_standard(name: str) -> bool:
 
 
 def _private_address(value: str) -> str | None:
-    for token in re.split(r"[\s,;]+", value):
-        token = token.strip().strip("[]").rsplit(":", 1)[0] if token.count(":") == 1 else token.strip().strip("[]")
+    """The first private / loopback / link-local address anywhere in a header value (``10.0.0.5:8080``,
+    ``for=10.1.2.3``, ``[fd00::1]:443``)."""
+    candidates = _IPV4_RE.findall(value)
+    for token in re.split(r"[\s,;=\"']+", value):
+        if token.startswith("["):  # bracketed IPv6, optionally with a port
+            token = token[1:].split("]", 1)[0]
+        if token.count(":") >= 2:
+            candidates.append(token)
+    for candidate in candidates:
         try:
-            addr = ipaddress.ip_address(token)
+            addr = ipaddress.ip_address(candidate)
         except ValueError:
             continue
         if addr.is_private or addr.is_loopback or addr.is_link_local:
             return str(addr)
     return None
+
+
+def _has_word(name: str, words: tuple[str, ...]) -> bool:
+    """Whether a header name contains one of ``words`` as whole ``-``/``_``-separated words."""
+    padded = f"-{name.replace('_', '-')}-"
+    return any(f"-{w}-" in padded for w in words)
+
+
+def _has_version(name: str, value: str) -> bool:
+    if _PRODUCT_VERSION_RE.search(value):
+        return True
+    if _has_word(name, ("version",)):
+        return _VERSION_NUMBER_RE.search(value) is not None
+    return _BARE_VERSION_RE.search(_IPV4_RE.sub(" ", value)) is not None  # a bare address is not a version
 
 
 def classify_header(name: str, value: str) -> Classification | None:
@@ -172,18 +228,21 @@ def classify_header(name: str, value: str) -> Classification | None:
     if internal is not None:
         return Classification("information-leak", True, f"exposes an internal hostname ({internal.group(0)})")
 
-    if any(tok in low for tok in _DEBUG_TOKENS):
+    trace_id = _TRACE_ID_RE.search(low) is not None
+    if any(f in low for f in _DEBUG_FRAGMENTS) or (not trace_id and _has_word(low, _DEBUG_TOKENS)):
         return Classification("debug", True, "debug/diagnostic header exposed in responses")
+    if trace_id:
+        return Classification("backend-fingerprint", False, "request-tracing / correlation id")
 
-    if any(tok in low for tok in _BACKEND_TOKENS) or _HOSTNAMEY_RE.search(value):
-        hostnamey = _HOSTNAMEY_RE.search(value) is not None
-        versioned = bool(_VERSION_RE.search(value))
+    hostnamey = _HOSTNAMEY_RE.search(value) is not None
+    versioned = _has_version(low, value)
+    if hostnamey or any(tok in low for tok in _BACKEND_TOKENS):
         detail = " (names a host)" if hostnamey else (" (with a version)" if versioned else "")
         return Classification(
             "backend-fingerprint", hostnamey or versioned, "identifies a backend/cache/routing tier" + detail
         )
 
-    if _VERSION_RE.search(value):
+    if versioned:
         return Classification("information-leak", True, "exposes a software version")
 
     return Classification("custom", False, "non-standard header")
@@ -208,21 +267,22 @@ class StrangeHeaders(LookupModule):
         result = classify_header(name, value)
         if result is None:
             return
-        label = "-".join(p.capitalize() for p in name.split("-"))
+        # The finding is the header itself: re-emit the target's own value with no relation, so the store merges the
+        # classification into that entity's meta instead of drawing a header --exposes--> header self-loop. Keys the
+        # target does not carry (a run from the API passes only the value) are left out rather than written as null
+        # over the host / url / source the web spider recorded.
+        meta = {
+            "name": name,
+            "value": value[:1000],
+            "category": result.category,
+            "info_leak": result.info_leak,
+            "reason": result.reason,
+            "classified_by": "strange_headers",
+        }
+        meta.update({k: target.meta[k] for k in ("host", "url") if target.meta.get(k)})
         yield Emit(
             EntityType.HTTP_HEADER,
-            f"{label}: {value}"[:1000],
+            target.value,
             confidence=0.85 if result.info_leak else 0.6,
-            relation="exposes",
-            parent=target,
-            meta={
-                "name": name,
-                "value": value[:1000],
-                "category": result.category,
-                "info_leak": result.info_leak,
-                "reason": result.reason,
-                "host": target.meta.get("host"),
-                "url": target.meta.get("url"),
-                "source": "strange_headers",
-            },
+            meta=meta,
         )

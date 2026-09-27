@@ -9,7 +9,11 @@ a password, does it have a login or file-upload form, does a form post credentia
 HTTP, does it redirect via ``<meta refresh>``, does it embed third-party frames or legacy plugins. The analysis
 (:func:`analyze_page`) is a pure function over the markup, so it is exercised offline against a fixture; the
 lookup only fetches the page first when handed a bare ``url``. When the web spider already collected the page it
-arrives as ``raw_content`` (markup in ``meta["text"]``) and nothing is fetched.
+arrives as ``raw_content`` (markup in ``meta["text"]``) and nothing is fetched; a ``raw_content`` target without
+its text (a run from the API or CLI passes only the value, the page URL) is fetched from that URL instead.
+
+"Third-party" and "external" mean another *site* (registrable domain): a login form on ``www.example.com``
+posting to ``login.example.com`` is not external.
 """
 
 from __future__ import annotations
@@ -22,7 +26,8 @@ from urllib.parse import urljoin, urlsplit
 
 from osint_board.entities.types import EntityType
 from osint_board.modules.base import LookupModule
-from osint_board.modules.helpers import host_of
+from osint_board.modules.extraction import MAX_CHARS
+from osint_board.modules.helpers import host_of, registrable_domain
 from osint_board.modules.registry import module
 from osint_board.modules.types import Emit, EntityRef
 
@@ -106,6 +111,8 @@ class _Parser(HTMLParser):
         self.legacy: list[str] = []
         self.external_scripts: list[str] = []
         self.comments = 0
+        #: input types outside any ``<form>`` (script-driven logins post these with fetch/XHR)
+        self.loose_inputs: list[str] = []
         self._form: Form | None = None
         self._in_title = False
 
@@ -119,7 +126,9 @@ class _Parser(HTMLParser):
         elif tag in ("input", "select", "textarea", "button"):
             itype = a.get("type", "").lower() if tag == "input" else tag
             form = self._form
-            if form is not None:
+            if form is None:
+                self.loose_inputs.append(itype)
+            else:
                 form.inputs.append(itype)
                 if itype == "password":
                     form.has_password = True
@@ -181,7 +190,7 @@ def analyze_page(html: str, url: str) -> PageInfo:
     except Exception:  # noqa: BLE001 - html.parser is lenient; keep whatever was collected
         pass
 
-    page_host = _host(url)
+    page_site = _site(_host(url))
     page_insecure = urlsplit(url).scheme == "http"
     info = PageInfo(url=url)
     info.title = re.sub(r"\s+", " ", "".join(parser.title_parts)).strip() or None
@@ -190,16 +199,24 @@ def analyze_page(html: str, url: str) -> PageInfo:
     info.forms = parser.forms
     info.meta_refresh = parser.meta_refresh
     info.generator = parser.generator
-    info.external_scripts = sum(1 for s in parser.external_scripts if _is_external(s, page_host))
+    info.external_scripts = sum(1 for s in parser.external_scripts if _is_external(s, page_site))
     info.comment_count = parser.comments
     info.legacy_plugins = sorted(set(parser.legacy))
 
     frame_hosts: list[str] = []
     for src in parser.frame_srcs:
         h = _host(urljoin(url, src))
-        if h and h != page_host and h not in frame_hosts:
+        if h and _site(h) != page_site and h not in frame_hosts:
             frame_hosts.append(h)
     info.frame_hosts = frame_hosts
+
+    # A password field outside any <form> is still a password the page takes (script-driven logins post it
+    # themselves); on a plain-HTTP page it is typed in the clear whatever the script does with it.
+    loose = Form(inputs=parser.loose_inputs, has_password="password" in parser.loose_inputs)
+    if loose.has_password:
+        info.takes_passwords = True
+        info.has_login_form = loose.is_login
+        info.insecure_password_form = page_insecure
 
     external_hosts: list[str] = []
     for form in parser.forms:
@@ -212,17 +229,24 @@ def analyze_page(html: str, url: str) -> PageInfo:
         action_url = urljoin(url, form.action) if form.action else url
         action_scheme = urlsplit(action_url).scheme
         action_host = _host(action_url)
-        if action_host and action_host != page_host and action_host not in external_hosts:
+        if action_host and _site(action_host) != page_site and action_host not in external_hosts:
             external_hosts.append(action_host)
-        if form.has_password and (action_scheme == "http" or (page_insecure and not form.action)):
+        # a password typed into a plain-HTTP page is exposed even when the form posts to HTTPS (the page, and
+        # so the form's action, can be rewritten in transit), as it is when an HTTPS page posts it over HTTP
+        if form.has_password and (page_insecure or action_scheme == "http"):
             info.insecure_password_form = True
     info.external_form_hosts = external_hosts
     return info
 
 
-def _is_external(src: str, page_host: str) -> bool:
+def _site(host: str) -> str:
+    """The registrable domain a host belongs to (``login.example.co.uk`` → ``example.co.uk``)."""
+    return registrable_domain(host) if host else ""
+
+
+def _is_external(src: str, page_site: str) -> bool:
     h = _host(src) if "//" in src else ""
-    return bool(h) and h != page_host
+    return bool(h) and _site(h) != page_site
 
 
 @module("page_info")
@@ -235,6 +259,9 @@ class PageInformation(LookupModule):
         except Exception as exc:  # noqa: BLE001 - a dead page is a non-result, not a crash
             self.log.info("page_info.fetch_failed", url=url, error=str(exc))
             return None
+        if resp.status_code >= 500:  # a gateway / server error page says nothing about the page itself
+            self.log.info("page_info.fetch_failed", url=url, status=resp.status_code)
+            return None
         ctype = resp.headers.get("content-type", "").split(";")[0].strip().lower()
         if ctype and not ctype.startswith(("text/html", "application/xhtml+xml", "text/plain")):
             return None
@@ -244,16 +271,18 @@ class PageInformation(LookupModule):
         if target.type is EntityType.RAW_CONTENT:
             html = target.meta.get("text")
             url = target.meta.get("url") or target.value
-            if not html:
-                return
+            if not html and urlsplit(url).scheme not in ("http", "https"):
+                return  # content with no text and no page to fetch it from (decoded blobs, binary strings)
         else:
+            html = None
             url = target.value if "://" in target.value else f"https://{host_of(target)}/"
+        if not html:
             fetched = await self._fetch(url)
             if fetched is None:
                 return
             url, html = fetched
 
-        info = analyze_page(html, url)
+        info = analyze_page(str(html)[:MAX_CHARS], url)
         summary = info.summary()
         yield Emit(
             EntityType.PAGE_INFO,
