@@ -1,0 +1,5 @@
+[
+  {"url": "https://www.example.com/", "detected": true, "firewall": "Cloudflare", "manufacturer": "Cloudflare Inc.", "trigger_url": "https://www.example.com/"},
+  {"url": "https://www.example.com/", "detected": true, "firewall": "Generic", "manufacturer": "Unknown", "trigger_url": "https://www.example.com/?a=<script>"},
+  {"url": "https://www.example.com/", "detected": false, "firewall": "None", "manufacturer": "None"}
+]

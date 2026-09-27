@@ -1,0 +1,7 @@
+[
+  {"cause": "gitdir", "url": "https://www.example.com/.git/config", "misc": "[core] repositoryformatversion = 0"},
+  {"cause": "backupfiles", "url": "https://www.example.com/index.php~", "misc": ""},
+  {"cause": "phpinfo", "url": "https://www.example.com/phpinfo.php", "misc": "PHP Version 8.1.2"},
+  {"noturl": true},
+  {"cause": "onlycause"}
+]

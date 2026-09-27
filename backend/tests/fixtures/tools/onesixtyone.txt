@@ -1,0 +1,5 @@
+Scanning 4 hosts, 2 communities
+192.0.2.20 [public] Linux gw01 5.15.0-91-generic #101-Ubuntu SMP x86_64
+192.0.2.21 [private] HP ETHERNET MULTI-ENVIRONMENT,ROM none,JETDIRECT
+192.0.2.22 [public]
+malformed line without brackets

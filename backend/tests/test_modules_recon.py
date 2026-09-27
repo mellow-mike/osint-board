@@ -9,6 +9,7 @@ import pytest
 
 from osint_board.entities.types import EntityType
 from osint_board.modules.base import Scope
+from osint_board.modules.impl.cross_referencer import linked_sites
 from osint_board.modules.impl.page_info import Form, analyze_page
 from osint_board.modules.impl.similar_domains import permutations, split_domain
 from osint_board.modules.impl.strange_headers import classify_header, is_standard, parse_header
@@ -641,3 +642,63 @@ async def test_ssl_analyzer_quiet_on_handshake_failure(registry):
 
     mod._fetch_cert = fake_fetch
     assert [e async for e in mod.lookup(EntityRef(EntityType.IP, "203.0.113.5"))] == []
+
+
+# ---- cross_referencer: link analysis (pure) + lookup --------------------------------------------------------
+
+
+def test_linked_sites_returns_outbound_registrable_domains(fixtures_dir):
+    html = (fixtures_dir / "web" / "cross_referencer_hit.html").read_text()
+    sites = linked_sites(html, "https://partner.acme-holdings.net/")
+    # blog.example.com collapses to example.com; the own site and relative/mailto links drop out
+    assert sites == {"example.com", "example.org", "example.net", "twitter.com"}
+    assert "acme-holdings.net" not in sites
+
+
+async def test_cross_referencer_confirms_an_affiliate_on_a_backlink(registry, fake_http, fixtures_dir):
+    fake_http.route(
+        "partner.acme-holdings.net",
+        body=(fixtures_dir / "web" / "cross_referencer_hit.html").read_text(),
+        headers={"content-type": "text/html"},
+    )
+    mod = registry.instantiate("cross_referencer", scope=Scope(), config={"targets": ["example.com"]})
+    emits = [e async for e in mod.lookup(EntityRef(EntityType.DOMAIN, "partner.acme-holdings.net"))]
+
+    affiliate = [e for e in emits if e.type is EntityType.AFFILIATE_LINK]
+    domains = [e for e in emits if e.type is EntityType.DOMAIN]
+    assert len(affiliate) == 1 and affiliate[0].value == "acme-holdings.net"
+    assert affiliate[0].meta["links_to"] == ["example.com"] and affiliate[0].relation == "affiliated_with"
+    assert [e.value for e in domains] == ["acme-holdings.net"]
+
+
+async def test_cross_referencer_uses_scope_targets_as_a_fallback(registry, fake_http, fixtures_dir):
+    fake_http.route(
+        "partner.acme-holdings.net",
+        body=(fixtures_dir / "web" / "cross_referencer_hit.html").read_text(),
+        headers={"content-type": "text/html"},
+    )
+    mod = registry.instantiate("cross_referencer", scope=Scope(targets=["www.example.net"]))
+    emits = [e async for e in mod.lookup(EntityRef(EntityType.DOMAIN, "partner.acme-holdings.net"))]
+    assert {e.meta["links_to"][0] for e in emits} == {"example.net"}
+
+
+async def test_cross_referencer_is_a_noop_without_home_sites(registry, fake_http):
+    mod = registry.instantiate("cross_referencer", scope=Scope())
+    assert [e async for e in mod.lookup(EntityRef(EntityType.DOMAIN, "partner.acme-holdings.net"))] == []
+    assert fake_http.calls == []  # nothing to check against, so the candidate is never fetched
+
+
+async def test_cross_referencer_skips_the_target_when_it_is_a_home_site(registry, fake_http):
+    mod = registry.instantiate("cross_referencer", scope=Scope(), config={"targets": ["example.com"]})
+    assert [e async for e in mod.lookup(EntityRef(EntityType.DOMAIN, "www.example.com"))] == []
+    assert fake_http.calls == []
+
+
+async def test_cross_referencer_no_emit_without_a_backlink(registry, fake_http, fixtures_dir):
+    fake_http.route(
+        "partner.acme-holdings.net",
+        body=(fixtures_dir / "web" / "cross_referencer_hit.html").read_text(),
+        headers={"content-type": "text/html"},
+    )
+    mod = registry.instantiate("cross_referencer", scope=Scope(), config={"targets": ["never-linked.example"]})
+    assert [e async for e in mod.lookup(EntityRef(EntityType.DOMAIN, "partner.acme-holdings.net"))] == []
