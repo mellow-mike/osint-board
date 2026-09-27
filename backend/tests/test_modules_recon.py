@@ -179,6 +179,28 @@ def test_analyze_page_treats_the_same_site_as_first_party():
     assert info.external_form_hosts == [] and info.frame_hosts == ["widgets.other.net"] and info.external_scripts == 0
 
 
+def test_analyze_page_resolves_relative_urls_against_base_href():
+    html = (
+        '<base href="http://external.example/">'
+        '<form action="login"><input name=u><input type=password name=p></form>'
+        '<script src="app.js"></script><iframe src="widget"></iframe>'
+    )
+    info = analyze_page(html, "https://site.example/")
+    # the relative action submits to http://external.example/login: another site, over plain HTTP
+    assert info.external_form_hosts == ["external.example"] and info.insecure_password_form
+    assert info.external_scripts == 1 and info.frame_hosts == ["external.example"]
+
+
+def test_analyze_page_survives_malformed_urls():
+    html = (
+        '<base href="http://[bad"><form action="http://[x"><input type=password></form>'
+        '<iframe src="http://[y"></iframe><script src="data:text/javascript,1"></script>'
+    )
+    info = analyze_page(html, "https://site.example/")  # urljoin raises ValueError on these
+    assert info.takes_passwords and info.external_form_hosts == [] and info.frame_hosts == []
+    assert info.external_scripts == 0
+
+
 def test_login_form_needs_a_username_field():
     assert Form(has_password=True, inputs=["password"]).is_login is False
     assert Form(has_password=True, inputs=["text", "password"]).is_login is True
@@ -265,6 +287,11 @@ def test_is_standard_knows_the_registered_field_set():
         ("X-Ratelimit-Reset", "1695812345.5", "custom", False),
         ("X-AspNet-Version", "4.0.30319", "information-leak", True),
         ("X-AspNetMvc-Version", "5.2", "information-leak", True),
+        ("Proxy-Status", "ExampleCDN; error=http_protocol_error", None, None),  # RFC 9209
+        # internal means internal ranges, not ipaddress.is_private (which covers the public documentation nets)
+        ("X-Origin", "203.0.113.7", "custom", False),
+        ("X-Origin", "100.64.1.2", "information-leak", True),  # carrier-grade NAT
+        ("X-Origin", "::ffff:10.0.0.5", "information-leak", True),
     ],
 )
 def test_classify_header(name, value, category, leak):

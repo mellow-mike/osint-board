@@ -113,6 +113,8 @@ class _Parser(HTMLParser):
         self.comments = 0
         #: input types outside any ``<form>`` (script-driven logins post these with fetch/XHR)
         self.loose_inputs: list[str] = []
+        #: the first ``<base href>``, which relative URLs in the document resolve against
+        self.base: str | None = None
         self._form: Form | None = None
         self._in_title = False
 
@@ -120,6 +122,9 @@ class _Parser(HTMLParser):
         a = {k.lower(): (v or "") for k, v in attrs}
         if tag == "title":
             self._in_title = True
+        elif tag == "base":
+            if self.base is None and a.get("href"):
+                self.base = a["href"].strip()
         elif tag == "form":
             self._form = Form(method=(a.get("method", "get") or "get").lower(), action=a.get("action", ""))
             self.forms.append(self._form)
@@ -181,6 +186,14 @@ def _host(url: str) -> str:
         return ""
 
 
+def _join(base: str, ref: str) -> str:
+    """``urljoin`` that yields ``""`` for a malformed reference (``http://[bad``) instead of raising."""
+    try:
+        return urljoin(base, ref)
+    except ValueError:
+        return ""
+
+
 def analyze_page(html: str, url: str) -> PageInfo:
     """Pure page analysis: parse ``html`` (fetched from ``url``) into a :class:`PageInfo`."""
     parser = _Parser()
@@ -192,6 +205,8 @@ def analyze_page(html: str, url: str) -> PageInfo:
 
     page_site = _site(_host(url))
     page_insecure = urlsplit(url).scheme == "http"
+    # relative URLs in the page resolve against its <base href> when it has one
+    base = (_join(url, parser.base) if parser.base else "") or url
     info = PageInfo(url=url)
     info.title = re.sub(r"\s+", " ", "".join(parser.title_parts)).strip() or None
     if info.title:
@@ -199,14 +214,14 @@ def analyze_page(html: str, url: str) -> PageInfo:
     info.forms = parser.forms
     info.meta_refresh = parser.meta_refresh
     info.generator = parser.generator
-    info.external_scripts = sum(1 for s in parser.external_scripts if _is_external(s, page_site))
+    info.external_scripts = sum(1 for s in parser.external_scripts if _third_party(_host(_join(base, s)), page_site))
     info.comment_count = parser.comments
     info.legacy_plugins = sorted(set(parser.legacy))
 
     frame_hosts: list[str] = []
     for src in parser.frame_srcs:
-        h = _host(urljoin(url, src))
-        if h and _site(h) != page_site and h not in frame_hosts:
+        h = _host(_join(base, src))
+        if _third_party(h, page_site) and h not in frame_hosts:
             frame_hosts.append(h)
     info.frame_hosts = frame_hosts
 
@@ -226,10 +241,11 @@ def analyze_page(html: str, url: str) -> PageInfo:
             info.has_login_form = True
         if form.has_upload:
             info.has_upload_form = True
-        action_url = urljoin(url, form.action) if form.action else url
+        # an empty action submits to the document's own URL; a relative one resolves against <base href>
+        action_url = _join(base, form.action) if form.action else url
         action_scheme = urlsplit(action_url).scheme
         action_host = _host(action_url)
-        if action_host and _site(action_host) != page_site and action_host not in external_hosts:
+        if _third_party(action_host, page_site) and action_host not in external_hosts:
             external_hosts.append(action_host)
         # a password typed into a plain-HTTP page is exposed even when the form posts to HTTPS (the page, and
         # so the form's action, can be rewritten in transit), as it is when an HTTPS page posts it over HTTP
@@ -244,9 +260,9 @@ def _site(host: str) -> str:
     return registrable_domain(host) if host else ""
 
 
-def _is_external(src: str, page_site: str) -> bool:
-    h = _host(src) if "//" in src else ""
-    return bool(h) and _site(h) != page_site
+def _third_party(host: str, page_site: str) -> bool:
+    """Whether a host (empty for ``data:`` / ``javascript:`` / ``about:`` URLs) belongs to another site."""
+    return bool(host) and _site(host) != page_site
 
 
 @module("page_info")

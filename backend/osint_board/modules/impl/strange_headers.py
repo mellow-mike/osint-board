@@ -122,6 +122,18 @@ STANDARD_HEADERS: frozenset[str] = frozenset(
         "sec-websocket-extensions",
         "sec-websocket-protocol",
         "sec-websocket-version",
+        "proxy-status",  # RFC 9209
+        "preference-applied",  # RFC 7240
+        "memento-datetime",  # RFC 7089
+        "link-template",  # RFC 9652
+        "sunset",  # RFC 8594
+        "deprecation",  # RFC 9745
+        "signature",  # RFC 9421
+        "signature-input",
+        "want-content-digest",  # RFC 9530
+        "want-repr-digest",
+        "accept-post",
+        "dav",  # WebDAV (RFC 4918)
     }
 )
 
@@ -167,6 +179,24 @@ _BARE_VERSION_RE = re.compile(r"\b\d+(?:\.\d+){2,}\b")
 #: A version-named header (``X-AspNetMvc-Version: 5.2``) needs no product token in its value.
 _VERSION_NUMBER_RE = re.compile(r"\bv?\d+(?:\.\d+)+\b")
 _IPV4_RE = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
+
+#: Address space that only exists inside a network: RFC 1918, carrier-grade NAT (RFC 6598, also Tailscale and many
+#: pod networks), loopback, link-local and IPv6 unique-local. Not ``ipaddress.is_private``, which also covers the
+#: public documentation, benchmarking and reserved ranges.
+_INTERNAL_NETWORKS = tuple(
+    ipaddress.ip_network(n)
+    for n in (
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "100.64.0.0/10",
+        "127.0.0.0/8",
+        "169.254.0.0/16",
+        "::1/128",
+        "fc00::/7",
+        "fe80::/10",
+    )
+)
 _INTERNAL_HOST_RE = re.compile(r"\b[\w-]+\.(?:local|internal|lan|corp|intranet|home|localdomain)\b", re.I)
 _HOSTNAMEY_RE = re.compile(r"\b(?:srv|host|node|web|app|db|cache|lb|edge|pod)[\w-]*\d+[\w.-]*\b", re.I)
 
@@ -183,7 +213,7 @@ def is_standard(name: str) -> bool:
 
 
 def _private_address(value: str) -> str | None:
-    """The first private / loopback / link-local address anywhere in a header value (``10.0.0.5:8080``,
+    """The first internal (see :data:`_INTERNAL_NETWORKS`) address anywhere in a header value (``10.0.0.5:8080``,
     ``for=10.1.2.3``, ``[fd00::1]:443``)."""
     candidates = _IPV4_RE.findall(value)
     for token in re.split(r"[\s,;=\"']+", value):
@@ -196,7 +226,9 @@ def _private_address(value: str) -> str | None:
             addr = ipaddress.ip_address(candidate)
         except ValueError:
             continue
-        if addr.is_private or addr.is_loopback or addr.is_link_local:
+        if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
+            addr = addr.ipv4_mapped  # ::ffff:10.0.0.5
+        if any(addr in net for net in _INTERNAL_NETWORKS):
             return str(addr)
     return None
 
