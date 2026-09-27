@@ -68,17 +68,33 @@ def parse_testssl_json(text: str, target: EntityRef) -> list[Emit]:
                 )
             )
     if cert:
-        value = next((v for k in ("cert_expDate", "cert_notAfter", "cert_chainDates") if (v := cert.get(k))), "")
         emits.append(
             Emit(
                 EntityType.CERTIFICATE,
-                value,
+                _cert_value(cert, target),
                 relation="has_certificate",
                 parent=target,
                 meta={"entries": cert, "source": "tool_testssl"},
             )
         )
     return emits
+
+
+#: testssl.sh ids that uniquely name a certificate; a fingerprint or serial identifies it across renewals/hosts.
+_CERT_KEYS = ("cert_fingerprintSHA256", "cert_fingerprintSHA1", "cert_serialNumber")
+
+
+def _cert_value(cert: dict[str, str], target: EntityRef) -> str:
+    """A stable identity for the certificate entity.
+
+    Prefer a fingerprint or serial: the expiry date is not unique, so keying on it would upsert unrelated hosts'
+    certificates onto one node (entities are identified by ``(type, value)``). When testssl emitted no such field,
+    fall back to a host-qualified expiry so two certs still stay distinct, and never to the empty string."""
+    ident = next((v for k in _CERT_KEYS if (v := cert.get(k))), "")
+    if ident:
+        return ident
+    expiry = next((v for k in ("cert_expDate", "cert_notAfter", "cert_chainDates") if (v := cert.get(k))), "")
+    return f"{target.value}:{expiry}" if expiry else target.value
 
 
 @module("tool_testssl")

@@ -160,7 +160,16 @@ def test_parse_testssl_json_vulns_and_one_certificate():
     assert "heartbleed" not in ids and "service" not in ids
     certs = _by_type(emits, EntityType.CERTIFICATE)
     assert len(certs) == 1
+    # identity is the SHA-256 fingerprint (stable/unique), not the expiry date; the full facts live in meta
+    assert certs[0].value == "AB:CD:EF:00:11:22:33:44:55:66:77:88:99"
     assert certs[0].meta["entries"]["cert_commonName"] == "www.example.com"
+
+
+def test_parse_testssl_cert_value_falls_back_to_host_qualified_expiry():
+    # no fingerprint/serial in the output: the value must stay unique per host and never be the empty string
+    text = '[{"id":"cert_notAfter","severity":"OK","finding":"2025-12-31 23:59"}]'
+    cert = _by_type(parse_testssl_json(text, EntityRef(EntityType.HOSTNAME, "www.example.com")), EntityType.CERTIFICATE)
+    assert cert[0].value == "www.example.com:2025-12-31 23:59"
 
 
 async def test_testssl_lookup_reads_jsonfile(registry, monkeypatch):
@@ -311,9 +320,10 @@ async def test_cmseek_lookup_reads_result_tree(registry, monkeypatch, tmp_path):
     root.mkdir()
     (root / "cmseek.py").write_text("# stub")
     url = "http://www.example.com/"
-    result = root / "Result" / _result_dir(url) / "cms.json"
 
-    async def _fake(argv, **kwargs):  # noqa: ANN001
+    async def _fake(argv, *, timeout=900.0, env=None, cwd=None, max_bytes=64 << 20):  # noqa: ANN001
+        # CMSeeK writes its Result tree under the working directory it is run in (cwd), not the checkout root
+        result = Path(cwd) / "Result" / _result_dir(url) / "cms.json"
         result.parent.mkdir(parents=True, exist_ok=True)
         result.write_text(_read("cmseek.json"))
         return subproc.ToolResult(argv=list(argv), stdout="", stderr="", returncode=0)
@@ -322,6 +332,15 @@ async def test_cmseek_lookup_reads_result_tree(registry, monkeypatch, tmp_path):
     mod = registry.instantiate("tool_cmseek", config={"cmseek_dir": str(root)})
     emits = [e async for e in mod.lookup(EntityRef(EntityType.HOSTNAME, "www.example.com"))]
     assert [e.value for e in emits] == ["WordPress 6.4.2"]
+
+
+async def test_cmseek_lookup_timeout_is_no_findings(registry, monkeypatch, tmp_path):
+    root = tmp_path / "cmseek"
+    root.mkdir()
+    (root / "cmseek.py").write_text("# stub")
+    patch_timeout(monkeypatch)
+    mod = registry.instantiate("tool_cmseek", config={"cmseek_dir": str(root)})
+    assert [e async for e in mod.lookup(EntityRef(EntityType.HOSTNAME, "www.example.com"))] == []
 
 
 async def test_cmseek_lookup_missing_checkout_raises(registry, monkeypatch, tmp_path):
@@ -382,3 +401,37 @@ async def test_run_tool_times_out():
 async def test_run_tool_missing_binary_raises_toolnotfound():
     with pytest.raises(subproc.ToolNotFound):
         await subproc.run_tool(["osint-board-no-such-binary-zzz"])
+
+
+def _proc_dead(pid: int) -> bool:
+    """True when pid no longer exists or is a reaped zombie (Linux /proc, deterministic for the cancel test)."""
+    try:
+        with open(f"/proc/{pid}/stat") as fh:
+            state = fh.read().rsplit(")", 1)[1].split()[0]
+        return state == "Z"
+    except (FileNotFoundError, ProcessLookupError, IndexError):
+        return True
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="uses /proc to observe the child")
+async def test_run_tool_kills_the_child_on_cancellation(tmp_path):
+    import asyncio
+
+    pidfile = tmp_path / "pid"
+    code = f"import os, time; open({str(pidfile)!r}, 'w').write(str(os.getpid())); time.sleep(60)"
+    task = asyncio.ensure_future(subproc.run_tool([sys.executable, "-c", code], timeout=120))
+    for _ in range(100):  # wait for the child to record its pid
+        await asyncio.sleep(0.05)
+        if pidfile.exists():
+            break
+    pid = int(pidfile.read_text())
+
+    task.cancel()  # simulate arq's job deadline / worker shutdown cancelling the coroutine mid-scan
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    for _ in range(100):
+        if _proc_dead(pid):
+            break
+        await asyncio.sleep(0.05)
+    assert _proc_dead(pid)  # the scanner was SIGKILLed, not left running after the job was gone

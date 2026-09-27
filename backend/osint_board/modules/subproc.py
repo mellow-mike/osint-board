@@ -106,6 +106,12 @@ async def run_tool(
         with contextlib.suppress(ProcessLookupError):  # pragma: no cover - race on exit
             await proc.wait()
         raise ToolTimeout(f"{argv[0]!r} timed out after {timeout:.0f}s") from None
+    except asyncio.CancelledError:
+        # The job was cancelled out from under us (arq's own job deadline, a worker shutdown): SIGKILL the group
+        # so the scanner and its children do not outlive the job. asyncio's child watcher reaps the zombie; we
+        # re-raise at once rather than await, which under cancellation could hang or re-raise before the kill.
+        _kill_group(proc)
+        raise
     return ToolResult(
         argv=argv,
         stdout=stdout[:max_bytes].decode("utf-8", errors="replace"),

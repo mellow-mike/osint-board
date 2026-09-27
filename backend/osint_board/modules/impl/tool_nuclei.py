@@ -71,7 +71,7 @@ class ToolNuclei(LookupModule):
     async def lookup(self, target: EntityRef) -> AsyncIterator[Emit]:
         self.ctx.check_authorized(target)
         argv = ["nuclei", "-jsonl", "-silent", *self.ctx.config.get("args", []), "-u", target.value]
-        timeout = float(self.ctx.config.get("timeout", 1800))
+        timeout = float(self.ctx.config.get("timeout", 1500))  # headroom under the tools queue's 1800s job_timeout
         try:
             result = await subproc.run_tool(argv, timeout=timeout)
         except subproc.ToolTimeout as exc:

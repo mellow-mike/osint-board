@@ -111,7 +111,7 @@ class ToolNmap(LookupModule):
         if self.ctx.config.get("os"):
             argv.insert(-2, "-O")
         argv.append(subproc.as_scan_target(target.value))  # nmap has no '--' terminator: refuse a flag-like target
-        timeout = float(self.ctx.config.get("timeout", 1800))
+        timeout = float(self.ctx.config.get("timeout", 1500))  # headroom under the tools queue's 1800s job_timeout
         try:
             result = await subproc.run_tool(argv, timeout=timeout)
         except subproc.ToolTimeout as exc:  # a timed-out scan is "no findings", not a crash
