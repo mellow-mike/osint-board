@@ -114,6 +114,23 @@ async def test_nmap_lookup_timeout_is_no_findings(registry, monkeypatch):
     assert [e async for e in mod.lookup(EntityRef(EntityType.IP, "203.0.113.10"))] == []
 
 
+async def test_nmap_adds_the_ipv6_flag_for_an_ipv6_target(registry, monkeypatch):
+    seen = {}
+
+    async def _fake(argv, **kwargs):  # noqa: ANN001
+        seen["argv"] = list(argv)
+        return subproc.ToolResult(argv=list(argv), stdout="<nmaprun></nmaprun>", stderr="", returncode=0)
+
+    monkeypatch.setattr(subproc, "run_tool", _fake)
+    mod = registry.instantiate("tool_nmap", scope=Scope(allow_active=True))
+    [e async for e in mod.lookup(EntityRef(EntityType.IP, "2001:db8::1"))]
+    assert "-6" in seen["argv"] and seen["argv"][-1] == "2001:db8::1"  # nmap needs -6 to scan IPv6
+
+    seen.clear()
+    [e async for e in mod.lookup(EntityRef(EntityType.IP, "203.0.113.10"))]
+    assert "-6" not in seen["argv"]  # not added for IPv4
+
+
 # ---- nuclei ------------------------------------------------------------------------------------------------------
 
 
@@ -298,6 +315,20 @@ async def test_nbtscan_lookup_gated(registry, monkeypatch):
         [e async for e in registry.instantiate("tool_nbtscan", scope=Scope()).lookup(target)]
     mod = registry.instantiate("tool_nbtscan", scope=Scope(allow_active=True))
     assert [e async for e in mod.lookup(target)]
+
+
+async def test_nbtscan_rejects_ipv6_targets(registry, monkeypatch):
+    called = False
+
+    async def _fake(*a, **k):  # noqa: ANN002, ANN003
+        nonlocal called
+        called = True
+        return subproc.ToolResult([], "", "", 0)
+
+    monkeypatch.setattr(subproc, "run_tool", _fake)
+    mod = registry.instantiate("tool_nbtscan", scope=Scope(allow_active=True))
+    assert [e async for e in mod.lookup(EntityRef(EntityType.NETBLOCK, "2001:db8::/64"))] == []
+    assert not called  # NetBIOS-over-IPv4 only: no scan attempted
 
 
 # ---- onesixtyone -------------------------------------------------------------------------------------------------

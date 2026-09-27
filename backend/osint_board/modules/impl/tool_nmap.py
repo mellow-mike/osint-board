@@ -20,6 +20,7 @@ from xml.etree.ElementTree import ParseError
 from osint_board.entities.types import EntityType
 from osint_board.modules import subproc
 from osint_board.modules.base import LookupModule
+from osint_board.modules.helpers import is_ipv6
 from osint_board.modules.registry import module
 from osint_board.modules.types import Emit, EntityRef
 
@@ -118,6 +119,8 @@ class ToolNmap(LookupModule):
             argv.insert(-2, "-sV")
         if self.ctx.config.get("os"):
             argv.insert(-2, "-O")
+        if is_ipv6(target.value) and "-6" not in args:  # nmap needs -6 to scan an IPv6 host/range at all
+            argv.insert(-2, "-6")
         argv.append(subproc.as_scan_target(target.value))  # nmap has no '--' terminator: refuse a flag-like target
         timeout = float(self.ctx.config.get("timeout", 1500))  # headroom under the tools queue's 1800s job_timeout
         try:

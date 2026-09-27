@@ -50,6 +50,16 @@ def is_ip(value: str) -> bool:
     return True
 
 
+def is_ipv6(value: str) -> bool:
+    """True for an IPv6 address or CIDR (a bare host counts as a /128); False for IPv4 or non-IP input.
+
+    Used by the IPv4-only scanners (nbtscan, onesixtyone) to skip an IPv6 target and by nmap to add ``-6``."""
+    try:
+        return ipaddress.ip_network(value, strict=False).version == 6
+    except ValueError:
+        return False
+
+
 def hosts_in(netblock: str, limit: int = 256) -> list[str]:
     """Addresses inside a CIDR, capped at ``limit`` (list lookups against a /16 make no sense)."""
     net = ipaddress.ip_network(netblock, strict=False)

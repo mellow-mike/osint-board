@@ -17,6 +17,7 @@ from collections.abc import AsyncIterator
 from osint_board.entities.types import EntityType
 from osint_board.modules import subproc
 from osint_board.modules.base import LookupModule
+from osint_board.modules.helpers import is_ipv6
 from osint_board.modules.registry import module
 from osint_board.modules.types import Emit, EntityRef
 
@@ -82,6 +83,9 @@ class ToolNbtscan(LookupModule):
 
     async def lookup(self, target: EntityRef) -> AsyncIterator[Emit]:
         self.ctx.check_authorized(target)
+        if is_ipv6(target.value):  # nbtscan (NetBIOS-over-IPv4) and the dotted-quad parser are IPv4-only
+            self.log.info("tool_nbtscan.ipv6_unsupported", target=target.value)
+            return
         argv = ["nbtscan", *self.ctx.config.get("args", []), subproc.as_scan_target(target.value)]
         timeout = float(self.ctx.config.get("timeout", 600))
         try:

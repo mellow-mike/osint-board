@@ -11,7 +11,6 @@ to a temporary ``-i`` input file of individual addresses instead. Active: gated 
 
 from __future__ import annotations
 
-import ipaddress
 import re
 import tempfile
 from collections.abc import AsyncIterator
@@ -20,21 +19,13 @@ from pathlib import Path
 from osint_board.entities.types import EntityType
 from osint_board.modules import subproc
 from osint_board.modules.base import LookupModule
-from osint_board.modules.helpers import hosts_in
+from osint_board.modules.helpers import hosts_in, is_ipv6
 from osint_board.modules.registry import module
 from osint_board.modules.types import Emit, EntityRef
 
 # A responder with an empty sysDescr prints just ``<ip> [<community>]``; ``\s*`` (not ``\s+``) keeps its
 # UDP/161 open_port, while the ``if descr:`` guard below still suppresses the empty software emission.
 _LINE = re.compile(r"^(?P<addr>\d+\.\d+\.\d+\.\d+)\s+\[(?P<community>[^\]]+)\]\s*(?P<descr>.*)$")
-
-
-def _is_ipv6(value: str) -> bool:
-    """True for an IPv6 address or CIDR (``ip_network`` accepts a bare host as a /128), False for IPv4 or junk."""
-    try:
-        return ipaddress.ip_network(value, strict=False).version == 6
-    except ValueError:
-        return False
 
 
 def parse_onesixtyone(text: str, target: EntityRef) -> list[Emit]:
@@ -85,7 +76,7 @@ class ToolOnesixtyone(LookupModule):
 
     async def lookup(self, target: EntityRef) -> AsyncIterator[Emit]:
         self.ctx.check_authorized(target)
-        if _is_ipv6(target.value):  # onesixtyone and the dotted-quad parser are IPv4-only
+        if is_ipv6(target.value):  # onesixtyone and the dotted-quad parser are IPv4-only
             self.log.info("tool_onesixtyone.ipv6_unsupported", target=target.value)
             return
         args = self.ctx.config.get("args", [])
