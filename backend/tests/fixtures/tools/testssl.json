@@ -1,0 +1,13 @@
+[
+  {"id":"service","severity":"INFO","finding":"Service detected: HTTP"},
+  {"id":"cert_signatureAlgorithm","severity":"OK","finding":"SHA256 with RSA"},
+  {"id":"cert_commonName","severity":"OK","finding":"www.example.com"},
+  {"id":"cert_serialNumber","severity":"INFO","finding":"03A1B2C3D4E5F6"},
+  {"id":"cert_fingerprintSHA256","severity":"INFO","finding":"AB:CD:EF:00:11:22:33:44:55:66:77:88:99"},
+  {"id":"cert_caIssuers","severity":"INFO","finding":"R3 (Let's Encrypt)"},
+  {"id":"cert_notAfter","severity":"OK","finding":"2025-12-31 23:59"},
+  {"id":"cert_expDate","severity":"WARN","finding":"expires < 30 days (2025-01-05)"},
+  {"id":"BREACH","severity":"MEDIUM","finding":"potentially VULNERABLE, gzip HTTP compression detected","cve":"CVE-2013-3587","cwe":"CWE-310","ip":"203.0.113.10","port":"443"},
+  {"id":"heartbleed","severity":"OK","finding":"not vulnerable, no heartbeat extension"},
+  {"id":"RC4","severity":"HIGH","finding":"VULNERABLE (NOT ok): RC4 detected","cve":"CVE-2013-2566 CVE-2015-2808","port":"443","ip":"203.0.113.10"}
+]

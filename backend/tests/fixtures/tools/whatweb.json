@@ -1,0 +1,14 @@
+[
+  {
+    "target": "https://www.example.com/",
+    "http_status": 200,
+    "plugins": {
+      "nginx": { "version": ["1.18.0"], "string": ["nginx/1.18.0"] },
+      "HTTPServer": { "string": ["nginx/1.18.0"] },
+      "WordPress": { "version": ["6.4.2"] },
+      "PHP": { "version": ["8.1.2"], "module": ["mod_php"] },
+      "Country": { "string": ["UNITED STATES"], "module": ["US"] },
+      "X-Powered-By": { "string": ["PHP/8.1.2"] }
+    }
+  }
+]

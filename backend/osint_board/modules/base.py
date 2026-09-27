@@ -16,6 +16,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Iterable
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
+from urllib.parse import urlsplit
 
 from osint_board.catalog.models import ModuleSpec
 from osint_board.config import Settings, get_settings
@@ -71,17 +72,32 @@ class Scope:
             return False
         if not self.targets:
             return True
-        return any(
-            target.value == t or target.value.endswith("." + t) or _cidr_contains(t, target.value) for t in self.targets
-        )
+        # A URL is authorised by its host, so https://example.com/path is in scope for the target example.com
+        # (the scope lists domains/CIDRs, never full URLs); a bare host/IP/CIDR value compares as-is.
+        value = target.value
+        if "://" in value:
+            value = (urlsplit(value).hostname or value).lower().rstrip(".")
+        return any(value == t or value.endswith("." + t) or _cidr_contains(t, value) for t in self.targets)
 
 
 def _cidr_contains(cidr: str, value: str) -> bool:
+    """Whether ``value`` (a single address *or* a whole CIDR target) falls within the scope entry ``cidr``.
+
+    A netblock scanner authorised against a supernet (``10.0.0.0/8``) must be allowed on an in-scope subnet
+    (``10.1.0.0/16``), so a CIDR ``value`` is matched by :meth:`subnet_of` as well as a bare host by membership."""
     import ipaddress
 
     try:
-        return ipaddress.ip_address(value) in ipaddress.ip_network(cidr, strict=False)
+        net = ipaddress.ip_network(cidr, strict=False)
     except ValueError:
+        return False
+    try:
+        return ipaddress.ip_address(value) in net
+    except ValueError:
+        pass
+    try:
+        return ipaddress.ip_network(value, strict=False).subnet_of(net)
+    except (ValueError, TypeError):  # not a CIDR, or a v4/v6 version mismatch
         return False
 
 

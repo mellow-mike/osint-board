@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nmaprun>
+<?xml-stylesheet href="file:///usr/bin/../share/nmap/nmap.xsl" type="text/xsl"?>
+<nmaprun scanner="nmap" args="nmap -sV -O -oX - 203.0.113.10" start="1700000000" version="7.94" xmloutputversion="1.05">
+<host starttime="1700000001" endtime="1700000042">
+<status state="up" reason="echo-reply" reason_ttl="63"/>
+<address addr="203.0.113.10" addrtype="ipv4"/>
+<address addr="00:11:22:33:44:55" addrtype="mac" vendor="Acme"/>
+<hostnames>
+<hostname name="host10.example.com" type="PTR"/>
+</hostnames>
+<ports>
+<port protocol="tcp" portid="22">
+<state state="open" reason="syn-ack" reason_ttl="63"/>
+<service name="ssh" product="OpenSSH" version="8.9p1 Ubuntu 3ubuntu0.4" method="probed" conf="10"/>
+</port>
+<port protocol="tcp" portid="80">
+<state state="open" reason="syn-ack" reason_ttl="63"/>
+<service name="http" product="nginx" version="1.18.0" method="probed" conf="10"/>
+</port>
+<port protocol="tcp" portid="443">
+<state state="closed" reason="reset" reason_ttl="63"/>
+<service name="https"/>
+</port>
+</ports>
+<os>
+<osmatch name="Linux 5.4 - 5.15" accuracy="96" line="65000">
+<osclass type="general purpose" vendor="Linux" osfamily="Linux" osgen="5.X" accuracy="96"/>
+</osmatch>
+<osmatch name="Linux 4.15" accuracy="90" line="64000"/>
+</os>
+</host>
+<host starttime="1700000001" endtime="1700000005">
+<status state="down" reason="no-response" reason_ttl="0"/>
+<address addr="203.0.113.11" addrtype="ipv4"/>
+</host>
+<runstats><finished time="1700000042" elapsed="41.00" summary="Nmap done" exit="success"/></runstats>
+</nmaprun>

@@ -1,0 +1,5 @@
+Starting nuclei engine... [this is a progress banner, not JSON]
+{"template-id":"CVE-2021-44228","template":"cves/2021/CVE-2021-44228.yaml","info":{"name":"Apache Log4j RCE","severity":"critical","classification":{"cve-id":["CVE-2021-44228"],"cwe-id":["CWE-502"]}},"host":"https://target.example","matched-at":"https://target.example/api","matcher-name":"jndi","type":"http"}
+{"template-id":"tech-detect","info":{"name":"Technology Detection","severity":"info"},"host":"https://target.example","matched-at":"https://target.example/","type":"http"}
+{"template-id":"missing-hsts","info":{"name":"HSTS Header Missing","severity":"low"},"host":"https://target.example","matched-at":"https://target.example/"}
+not-json-either
