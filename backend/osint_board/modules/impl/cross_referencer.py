@@ -103,11 +103,14 @@ class CrossReferencer(LookupModule):
             parent=target,
             meta=meta,
         )
-        yield Emit(
-            EntityType.DOMAIN,
-            candidate,
-            confidence=0.8,
-            relation="affiliated_with",
-            parent=target,
-            meta={"links_to": hits, "via": "cross_referencer"},
-        )
+        # Surface the affiliate's registrable domain as a new pivot only when it isn't the target itself — an apex
+        # `domain` target already *is* that node, and emitting it would store an affiliated_with self-loop.
+        if candidate != host_of(target):
+            yield Emit(
+                EntityType.DOMAIN,
+                candidate,
+                confidence=0.8,
+                relation="affiliated_with",
+                parent=target,
+                meta={"links_to": hits, "via": "cross_referencer"},
+            )

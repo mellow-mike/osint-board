@@ -73,6 +73,21 @@ def test_parse_nmap_xml_open_ports_software_and_os():
     assert os_match[0].confidence == pytest.approx(0.96)  # best osmatch accuracy
 
 
+def test_parse_nmap_xml_links_discovered_host_to_a_hostname_target():
+    target = EntityRef(EntityType.HOSTNAME, "host10.example.com")
+    emits = parse_nmap_xml(_read("nmap.xml"), target)
+    ips = _by_type(emits, EntityType.IP)
+    assert len(ips) == 1 and ips[0].value == "203.0.113.10"
+    assert ips[0].relation == "resolves_to" and ips[0].parent.value == "host10.example.com"
+    # ports still hang off the discovered IP, which is now connected to the target rather than an island
+    assert all(e.parent.value == "203.0.113.10" for e in _by_type(emits, EntityType.OPEN_PORT))
+
+
+def test_parse_nmap_xml_no_self_link_for_an_ip_target():
+    emits = parse_nmap_xml(_read("nmap.xml"), EntityRef(EntityType.IP, "203.0.113.10"))
+    assert _by_type(emits, EntityType.IP) == []  # the scanned host is the target itself
+
+
 def test_parse_nmap_xml_tolerates_banner_before_xml():
     xml = "Starting Nmap 7.94\n" + _read("nmap.xml")
     assert parse_nmap_xml(xml, EntityRef(EntityType.IP, "203.0.113.10"))
@@ -112,6 +127,21 @@ def test_parse_nuclei_jsonl_one_vuln_per_finding_with_severity_confidence():
     assert min(e.confidence for e in emits) < crit.confidence  # info/low rank below critical
 
 
+def test_scope_authorizes_a_url_target_by_its_host():
+    scope = Scope(allow_active=True, targets=["target.example"])
+    assert scope.permits_active(EntityRef(EntityType.URL, "https://target.example/app"))  # host in scope
+    assert scope.permits_active(EntityRef(EntityType.URL, "https://api.target.example/v1"))  # subdomain host
+    assert scope.permits_active(EntityRef(EntityType.HOSTNAME, "target.example"))
+    assert not scope.permits_active(EntityRef(EntityType.URL, "https://evil.test/x"))
+
+
+async def test_nuclei_lookup_allows_a_url_target_in_domain_scope(registry, monkeypatch):
+    patch_run_tool(monkeypatch, stdout=_read("nuclei.jsonl"))
+    mod = registry.instantiate("tool_nuclei", scope=Scope(allow_active=True, targets=["target.example"]))
+    emits = [e async for e in mod.lookup(EntityRef(EntityType.URL, "https://target.example/app"))]
+    assert emits and all(e.type is EntityType.VULNERABILITY for e in emits)
+
+
 async def test_nuclei_lookup_gated_and_filtered(registry, monkeypatch):
     patch_run_tool(monkeypatch, stdout=_read("nuclei.jsonl"))
     target = EntityRef(EntityType.URL, "https://target.example")
@@ -129,6 +159,8 @@ def test_parse_whatweb_json_plugins_become_software():
     emits = parse_whatweb_json(_read("whatweb.json"), EntityRef(EntityType.URL, "https://www.example.com/"))
     names = {e.value for e in emits}
     assert {"nginx", "WordPress", "PHP"} <= names
+    # metadata plugins (geo/IP/status/header echoes) must not be emitted as installed software
+    assert names.isdisjoint({"Country", "HTTPServer", "X-Powered-By", "IP", "Title", "HTTPStatus"})
     wp = next(e for e in emits if e.value == "WordPress")
     assert "6.4.2" in wp.meta["values"]
 
@@ -246,6 +278,9 @@ def test_parse_nbtscan_names_and_ports_only_for_responders():
     assert ports == {"192.0.2.3:137", "192.0.2.4:137"}
     # the *timeout* (192.0.2.5) and blank-name "-" (192.0.2.6) sentinel rows are non-responders: nothing emitted
     assert "192.0.2.5:137" not in ports and "192.0.2.6:137" not in ports
+    ips = _by_type(emits, EntityType.IP)
+    assert {e.value for e in ips} == {"192.0.2.3", "192.0.2.4"}  # answering hosts linked to the scanned netblock
+    assert all(e.relation == "contains" and e.parent.value == "192.0.2.0/29" for e in ips)
 
 
 async def test_nbtscan_lookup_gated(registry, monkeypatch):
@@ -269,6 +304,9 @@ def test_parse_onesixtyone_ports_and_sysdescr():
     assert {e.parent.value for e in software} == {"192.0.2.20", "192.0.2.21"}  # not the empty-descr .22
     assert any("Linux gw01" in e.value for e in software)
     assert all(e.meta["service"] == "snmp" for e in software)
+    ips = _by_type(emits, EntityType.IP)
+    assert {e.value for e in ips} == {"192.0.2.20", "192.0.2.21", "192.0.2.22"}  # one link per host, deduped
+    assert all(e.relation == "contains" and e.parent.value == "192.0.2.0/24" for e in ips)
 
 
 async def test_onesixtyone_lookup_gated(registry, monkeypatch):

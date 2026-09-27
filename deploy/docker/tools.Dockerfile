@@ -28,7 +28,10 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 WORKDIR /app
 COPY backend /app/backend
 COPY catalog /app/catalog
-RUN cd /app/backend && uv sync --frozen --no-dev
+# Sync the worker venv, then add CMSeeK's own dependencies into it: tool_cmseek runs `cmseek.py` with the
+# worker interpreter (sys.executable), so its imports must resolve inside this venv, not just system Python.
+RUN cd /app/backend && uv sync --frozen --no-dev \
+    && uv pip install --no-cache-dir -r /opt/cmseek/requirements.txt
 ENV PATH="/app/backend/.venv/bin:$PATH" OSINT_TOOLS_DIR=/opt
 WORKDIR /app/backend
 CMD ["osint-board", "worker", "--queue", "tools"]

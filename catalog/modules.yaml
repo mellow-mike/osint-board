@@ -4100,6 +4100,7 @@ modules:
       - ip
       - netblock
     produces:
+      - ip
       - hostname
       - open_port
     geo: none
@@ -4122,6 +4123,7 @@ modules:
       - hostname
       - netblock
     produces:
+      - ip
       - open_port
       - software
       - operating_system
@@ -4164,6 +4166,7 @@ modules:
       - ip
       - netblock
     produces:
+      - ip
       - open_port
       - software
     geo: none

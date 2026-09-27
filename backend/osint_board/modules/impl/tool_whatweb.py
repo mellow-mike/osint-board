@@ -22,9 +22,23 @@ from osint_board.modules.base import LookupModule
 from osint_board.modules.registry import module
 from osint_board.modules.types import Emit, EntityRef
 
+#: WhatWeb plugins that describe the request/response or geo/IP rather than installed technology — emitting them
+#: as ``software`` would pollute the graph with values like "UNITED STATES" or an HTTP status code.
+_METADATA_PLUGINS = frozenset(
+    {
+        "Country", "IP", "HTTPServer", "HTTPStatus", "Title", "RedirectLocation", "Meta-Refresh-Redirect",
+        "Cookies", "HttpOnly", "UncommonHeaders", "X-Powered-By", "X-Frame-Options", "X-XSS-Protection",
+        "Strict-Transport-Security", "Content-Security-Policy", "Access-Control-Allow-Methods", "Via-Proxy",
+        "Content-Language", "Allow", "Email", "Frame", "Script", "PasswordField", "Comment", "HTML5",
+    }
+)  # fmt: skip
+
 
 def parse_whatweb_json(text: str, target: EntityRef) -> list[Emit]:
-    """WhatWeb ``--log-json`` output (a result per target, each with a plugin→info map) → ``software``."""
+    """WhatWeb ``--log-json`` output (a result per target, each with a plugin→info map) → ``software``.
+
+    Only technology plugins are emitted; WhatWeb's request/response metadata plugins (:data:`_METADATA_PLUGINS`
+    — Country, IP, Title, header echoes ...) are skipped so they do not land in the graph as fake software."""
     emits: list[Emit] = []
     try:
         doc = json.loads(text)
@@ -38,6 +52,8 @@ def parse_whatweb_json(text: str, target: EntityRef) -> list[Emit]:
         if not isinstance(plugins, dict):
             continue
         for name, info in sorted(plugins.items()):
+            if name in _METADATA_PLUGINS:
+                continue
             values: list[str] = []
             if isinstance(info, dict):
                 for _key, val in info.items():

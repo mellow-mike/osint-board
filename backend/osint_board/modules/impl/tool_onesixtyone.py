@@ -2,7 +2,7 @@
 
 Catalog: tool_onesixtyone · tool · lookup · access=local · phase 2 · requires_authorization
 Consumes: ip, netblock
-Produces: open_port, software
+Produces: ip, open_port, software
 
 onesixtyone answers one ``<address> [<community>] <system-descriptor>`` line per responsive host; the parser is
 pure. Active: gated by ``ctx.check_authorized``.
@@ -27,11 +27,23 @@ _LINE = re.compile(r"^(?P<addr>\d+\.\d+\.\d+\.\d+)\s+\[(?P<community>[^\]]+)\]\s
 def parse_onesixtyone(text: str, target: EntityRef) -> list[Emit]:
     """onesixtyone output → UDP/161 ``open_port`` plus the SNMP system descriptor as ``software``."""
     emits: list[Emit] = []
+    linked: set[str] = set()
     for line in text.splitlines():
         m = _LINE.match(line.strip())
         if not m:
             continue  # "Scanning N hosts, M communities" banner
         addr, community, descr = m.group("addr"), m.group("community"), m.group("descr").strip()
+        if addr != target.value and addr not in linked:  # link each answering host to the scanned netblock once
+            linked.add(addr)
+            emits.append(
+                Emit(
+                    EntityType.IP,
+                    addr,
+                    relation="contains",
+                    parent=target,
+                    meta={"host": addr, "source": "tool_onesixtyone"},
+                )
+            )
         emits.append(
             Emit(
                 EntityType.OPEN_PORT,

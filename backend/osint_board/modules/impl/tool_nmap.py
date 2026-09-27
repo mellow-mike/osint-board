@@ -2,7 +2,7 @@
 
 Catalog: tool_nmap · tool · lookup · access=local · phase 2 · requires_authorization
 Consumes: ip, hostname, netblock
-Produces: open_port, software, operating_system
+Produces: ip, open_port, software, operating_system
 
 Wrapper for nmap's XML output (``-oX -``); the default scan is ``-sV`` (version detection), with ``-O``
 (OS fingerprinting — needs the NET_RAW capability the tools container may grant) added when
@@ -41,7 +41,9 @@ def _ref(addr: str) -> EntityRef:
 def parse_nmap_xml(text: str, target: EntityRef) -> list[Emit]:
     """nmap ``-oX`` output → open ports, service software and host-OS matches for every ``up`` host.
 
-    Parent of assets is the scanned host, not the original target (a netblock scan maps to many)."""
+    Assets hang off the scanned host (a netblock scan maps to many), and each discovered host is itself linked
+    back to the target so the graph stays connected — otherwise a hostname/netblock scan leaves its hosts as
+    islands (the platform only stores a ``parent -> emission`` edge)."""
     emits: list[Emit] = []
     try:
         root = ElementTree.fromstring(text)
@@ -58,9 +60,15 @@ def parse_nmap_xml(text: str, target: EntityRef) -> list[Emit]:
         status = host.find("status")
         if status is not None and status.get("state") != "up":
             continue
-        addrs = [a.get("addr") for a in host.findall("address") if a.get("addr")]
+        ip_addrs = [a.get("addr") for a in host.findall("address") if a.get("addrtype") in ("ipv4", "ipv6")]
+        addrs = ip_addrs or [a.get("addr") for a in host.findall("address") if a.get("addr")]
         addr = addrs[0] if addrs else target.value
         ref = _ref(addr)
+        if ref.type is EntityType.IP and addr != target.value:  # connect the discovered host to the target
+            rel = "resolves_to" if target.type is EntityType.HOSTNAME else "contains"
+            emits.append(
+                Emit(EntityType.IP, addr, relation=rel, parent=target, meta={"host": addr, "source": "tool_nmap"})
+            )
         for port in host.iter("port"):
             state = port.find("state")
             if state is not None and state.get("state") != "open":

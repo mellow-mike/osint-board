@@ -2,7 +2,7 @@
 
 Catalog: tool_nbtscan · tool · lookup · access=local · phase 2 · requires_authorization
 Consumes: ip, netblock
-Produces: hostname, open_port
+Produces: ip, hostname, open_port
 
 nbtscan prints a fixed-width table of IP address → NetBIOS name when a host answers NBSTAT; the parser skips
 the banner lines keyed by an initial IP. Active: gated by ``ctx.check_authorized``.
@@ -42,6 +42,10 @@ def parse_nbtscan(text: str, target: EntityRef) -> list[Emit]:
         name = cols[1] if len(cols) > 1 else ""
         if not _valid_name(name):  # a listed host that did not answer NBSTAT — no name, no open port
             continue
+        if ip != target.value:  # link the answering host to the scanned netblock so the graph stays connected
+            emits.append(
+                Emit(EntityType.IP, ip, relation="contains", parent=target, meta={"host": ip, "source": "tool_nbtscan"})
+            )
         emits.append(
             Emit(
                 EntityType.OPEN_PORT,

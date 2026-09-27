@@ -702,3 +702,15 @@ async def test_cross_referencer_no_emit_without_a_backlink(registry, fake_http, 
     )
     mod = registry.instantiate("cross_referencer", scope=Scope(), config={"targets": ["never-linked.example"]})
     assert [e async for e in mod.lookup(EntityRef(EntityType.DOMAIN, "partner.acme-holdings.net"))] == []
+
+
+async def test_cross_referencer_no_self_loop_domain_for_an_apex_target(registry, fake_http, fixtures_dir):
+    fake_http.route(
+        "acme-holdings.net",
+        body=(fixtures_dir / "web" / "cross_referencer_hit.html").read_text(),
+        headers={"content-type": "text/html"},
+    )
+    mod = registry.instantiate("cross_referencer", scope=Scope(), config={"targets": ["example.com"]})
+    emits = [e async for e in mod.lookup(EntityRef(EntityType.DOMAIN, "acme-holdings.net"))]
+    # the affiliate is recorded, but the apex target is not re-emitted as a domain (that would be a self-loop)
+    assert [e.type for e in emits] == [EntityType.AFFILIATE_LINK]

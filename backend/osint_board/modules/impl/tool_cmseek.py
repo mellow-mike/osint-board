@@ -84,8 +84,11 @@ class ToolCmseek(LookupModule):
         if not Path(script).exists():
             raise subproc.ToolNotFound(f"CMSeeK checkout not found at {root!r} (OSINT_TOOLS_DIR)")
         timeout = float(self.ctx.config.get("timeout", 900))
+        # CMSeeK must run under an interpreter that has its own dependencies. The tools image installs them into
+        # the worker venv, so sys.executable works; ``python`` lets a deployment point at another interpreter.
+        interp = self.ctx.config.get("python") or sys.executable
         with tempfile.TemporaryDirectory() as tmp:
-            argv = [sys.executable, script, "-u", url, "--batch", "--light-scan", *self.ctx.config.get("args", [])]
+            argv = [interp, script, "-u", url, "--batch", "--light-scan", *self.ctx.config.get("args", [])]
             try:
                 await subproc.run_tool(argv, timeout=timeout, cwd=tmp)
             except subproc.ToolTimeout as exc:
