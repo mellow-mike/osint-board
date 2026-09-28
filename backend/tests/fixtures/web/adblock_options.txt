@@ -1,0 +1,12 @@
+[Adblock Plus 2.0]
+! Exceptions, request types, third-party classification and document-domain options.
+||assets.example/blocked.js$script
+@@||assets.example/blocked.js$domain=allowed.example
+||assets.example/allowed.js$script
+@@||assets.example/allowed.js
+||assets.example/tracker.png$image
+||assets.example/frame$subdocument
+||third.example^$third-party
+||landing.example^$third-party
+||scoped.example^$domain=landing.example
+||ignored.example^$domain=original.example

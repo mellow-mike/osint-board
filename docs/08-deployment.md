@@ -19,7 +19,7 @@ docker compose up -d --build
 Optional compose profiles:
 
 ```bash
-docker compose --profile tools up -d           # nmap, nuclei, testssl and the other Tool modules
+docker compose --profile tools up -d --build tools  # nmap, nuclei, testssl and the other Tool modules
 docker compose --profile replacements up -d    # SearXNG (meta_search), Photon (geocoder), Tor proxy
 ```
 
@@ -29,6 +29,29 @@ from a checkout, `make infra` adds `docker-compose.dev.yml`, which publishes it 
 (`REDIS_PORT`). Put a reverse proxy with TLS in front for anything reachable from a network.
 
 `.env` is optional (`env_file` is `required: false`, Compose 2.24 or later): every key in `.env.example` is.
+
+### External-tool worker
+
+The 13 `tool_*` modules use a separate `osint:tools` queue; enabling their adapters does not install binaries
+in the ordinary backend worker. Build the opt-in image from `deploy/docker/tools.Dockerfile`. The tools
+service waits for Postgres, Redis, Meilisearch and migrations and uses the same database/search settings as
+the other backend services. Compose limits it to 2 CPUs, 2 GiB memory and 256 processes; tune these limits
+for the scanners you enable. `NET_RAW` supports raw-packet scans; `NET_ADMIN` is not required.
+
+The worker accepts four jobs concurrently with a 30-minute job deadline. Scanner subprocesses have their own
+timeouts and process groups; timeout/cancellation kills their child processes as well. Missing binaries
+produce a recorded error. Catalog entries marked `requires_authorization` still need an authorized
+investigation while `OSINT_PASSIVE_ONLY=true`; starting this worker does not grant that authorization.
+
+The tools include nmap, nuclei, testssl, WhatWeb, WAFW00F, CMSeeK, nbtscan, onesixtyone, snallygaster,
+DNSTwist, Retire.js, TruffleHog and a maintained community Wappalyzer engine. Retire.js examines a direct
+JavaScript file or bounded same-origin scripts referenced by a page; inline scripts, module imports and
+off-origin CDN scripts are not covered. Wappalyzer matches captured HTML, headers, cookies, meta tags and
+script URLs without running the page's JavaScript; truncated samples are labeled. Neither adapter provides
+browser execution coverage. TruffleHog scans public HTTP(S) Git repositories with verification
+disabled, storing only fingerprints and source locations. Native scanner egress is controlled by the
+scanner/container configuration; `OSINT_OUTBOUND_PROXY` applies to requests made through the backend HTTP
+client, and is not automatically passed to scanner processes.
 
 ## Configuration
 
@@ -41,7 +64,7 @@ matter most:
 | `OSINT_REDIS_URL` | local Redis | queues, cache, pub/sub |
 | `OSINT_MEILI_URL` / `OSINT_MEILI_KEY` | local Meili | search index |
 | `OSINT_PASSIVE_ONLY` | true | refuse active modules unless an investigation scope allows them |
-| `OSINT_OUTBOUND_PROXY` | unset | route all module traffic through a proxy |
+| `OSINT_OUTBOUND_PROXY` | unset | proxy requests made through the backend HTTP client; native scanners need their own egress configuration |
 | `OSINT_TOR_SOCKS_PROXY` | socks5h://tor:9050 | onion modules |
 | `OSINT_GEOIP_CITY_DB` | unset | path to a GeoLite2/DB-IP `.mmdb` for the interim geoip provider |
 | `OSINT_MODULE_<ID>_API_KEY` | unset | per-module credentials; ids match `catalog/modules.yaml` |
@@ -57,6 +80,23 @@ The globe needs no keys: quakes, news, satellites, Tor relays and **aircraft** (
 are listed in `.env.example` (AISStream, NASA FIRMS, OpenCellID, WiGLE, abuse.ch/ThreatFox, GitHub, urlscan,
 LeakIX); OpenSky is an optional accelerator for aircraft.
 
+Phase-2 recon options use the same per-module JSON configuration mechanism:
+
+| Module | Options and behavior |
+|---|---|
+| `cross_referencer` | `targets`: investigation domains to match against backlinks; falls back to scope targets, and emits nothing when neither is set |
+| `interesting_files` | `max_files`: 100 by default, capped at 500; samples at most 1 MiB of one page and returns linked file references |
+| `junk_files` | `paths`: optional filenames in the target directory replacing defaults; `max_paths`: 30, capped at 100; `concurrency`: 2, capped at 4; each probe samples at most 64 KiB |
+| `adblock_check` | `lists`: optional name-to-URL map replacing EasyList/EasyPrivacy; `ttl`: 86,400 seconds by default; all-list failure is an error, partial failures are reported and retried |
+| `tool_dnstwist` | `threads`: 4, capped at 16; `timeout`: 900 seconds, capped at 1,500; DNS-only registered-domain results |
+| `tool_trufflehog` | `concurrency`: 4, capped at 16; `timeout`: 900 seconds, capped at 1,500; optional `max_depth` limits commit history |
+| `tool_retirejs` | `max_scripts`: 20, capped at 50; `max_bytes`: 2 MiB per response, capped at 8 MiB; `max_total_bytes`: 10 MiB, capped at 32 MiB; `timeout`: 120 seconds, capped at 1,500; optional `jsrepo` selects the local/URL vulnerability database |
+| `tool_wappalyzer` | `fingerprints_dir`: defaults to `/opt/wappalyzer` in the tools image; `max_bytes`: 2 MiB maximum; `timeout`: 60 seconds, capped at 300; uses the community engine and fingerprint set bundled when the image is built |
+
+For example, `OSINT_MODULE_CROSS_REFERENCER_CONFIG='{"targets":["example.com"]}'` establishes the home domain
+against which candidate affiliate pages are checked. Junk-file probing is a separate authorized action;
+finding a document link does not imply permission to guess unlinked backup paths.
+
 ## Cloud (Kubernetes, Helm)
 
 `deploy/helm/osint-board` assumes managed data services (RDS/Cloud SQL with PostGIS, Elasticache/Memorystore,
@@ -70,6 +110,12 @@ kubectl create secret generic osint-board-secrets \
   --from-literal=OSINT_MEILI_KEY=...
 helm install osint-board deploy/helm/osint-board -f my-values.yaml
 ```
+
+To run external tools, build and publish `deploy/docker/tools.Dockerfile` to a registry your cluster can
+access, then set `tools.enabled: true`. The tools image defaults to `<image.repository>-tools:<image.tag>`;
+override `tools.image.repository` and `tools.image.tag` for your registry. `tools.replicas` and
+`tools.resources` control scaling and limits independently of the ordinary worker. The tools deployment
+runs migrations before starting and receives the common ConfigMap/Secret settings.
 
 Shape of the deployment:
 

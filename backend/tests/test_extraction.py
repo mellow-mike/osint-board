@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import uuid
 
+import pytest
+
 from osint_board.entities.types import EntityType
 from osint_board.modules.extraction import ExtractorPipeline, content_of
 from osint_board.modules.types import Emit, EntityRef
@@ -62,6 +64,37 @@ def test_pipeline_dedupes_per_document(registry):
     other = Emit(EntityType.RAW_CONTENT, "https://www.example.com/about", meta={"text": "press@example.com"})
     emails = pipeline.run([*page_emits(), other])["email_extractor"]
     assert sorted(e.parent.value for e in emails) == ["https://www.example.com/about", PAGE]  # one edge per page
+
+
+def test_file_discovery_references_do_not_fabricate_downloaded_content(registry):
+    from osint_board.modules.impl.interesting_files import parse_interesting_files
+
+    emits = parse_interesting_files('<a href="report.pdf">Report</a>', EntityRef(EntityType.URL, PAGE))
+    raw_file = next(emit for emit in emits if emit.type is EntityType.RAW_FILE)
+    assert content_of(raw_file) is None
+    assert "binary_strings" not in ExtractorPipeline(registry).run(emits)
+    assert raw_file.value == raw_file.meta["url"] == "https://www.example.com/report.pdf"
+    assert "file_metadata" in {info.spec.id for info in registry.for_input("raw_file")}
+
+
+@pytest.mark.parametrize("representation", ["text", "bytes", "bytearray"])
+def test_file_content_still_extracts_after_reference_to_same_file(registry, representation):
+    url = "https://www.example.com/report.pdf"
+    data = b"\x00\xffcontact report@buried.example\x00"
+    value = (
+        data.decode("latin-1")
+        if representation == "text"
+        else bytearray(data)
+        if representation == "bytearray"
+        else data
+    )
+    key = "text" if representation == "text" else "bytes"
+    reference = Emit(EntityType.RAW_FILE, url, meta={"url": url})
+    downloaded = Emit(EntityType.RAW_FILE, url, meta={key: value, "url": url})
+    assert content_of(downloaded).text == data.decode("latin-1")
+    found = ExtractorPipeline(registry).run([reference, downloaded])
+    assert found["binary_strings"][0].parent == EntityRef(EntityType.RAW_FILE, url)
+    assert {emit.value for emit in found["email_extractor"]} == {"report@buried.example"}
 
 
 class NoGeo:

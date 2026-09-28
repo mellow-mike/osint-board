@@ -7,7 +7,7 @@ own compliance.
 ## Passive by default
 
 - `OSINT_PASSIVE_ONLY=true` is the default. Modules marked `requires_authorization: true` in the catalog
-  (port scanner, nmap, nuclei, nbtscan, onesixtyone, snallygaster, DNS brute force, zone transfer) are refused
+  (port scanner, junk-file probing, nmap, nuclei, nbtscan, onesixtyone, snallygaster, DNS brute force, zone transfer) are refused
   unless the investigation's scope allows them. Setting `OSINT_PASSIVE_ONLY=false` opts the whole instance into
   active scanning and lifts this gate for every active module, so leave it on unless the deployment is dedicated
   to authorised active work.
@@ -33,7 +33,8 @@ authorised scope.
   written to the database. Several free APIs put the key in the URL (NASA FIRMS, OpenCellID), so every value a
   module reads through `ctx.secret()`, every `OSINT_MODULE_*` value and credential query parameters are masked
   (`osint_board/redaction.py`) in logs, error messages, retry logs and the soak journal and reports; httpx's own
-  request log is silenced. Secrets discovered by TruffleHog are kept as fingerprints, not values. Credit-card
+  request log is silenced. Secrets discovered by TruffleHog are kept as fingerprints and source locations,
+  not values; credential verification is disabled. Credit-card
   numbers are masked at normalisation (`first6****last4`).
 - **Personal data.** Modules that gather information about people (social, people, phone, email) produce
   entities an operator can delete; deleting an investigation cascades to its entities, relations and
@@ -59,6 +60,8 @@ All module HTTP goes through one client (`osint_board/modules/http.py`) that can
 Per-module rate limits and `Retry-After` handling (seconds or an HTTP date, plus OpenSky's
 `X-Rate-Limit-Retry-After-Seconds`; waits over 2 min are handed back to the module rather than slept) keep the
 platform a good citizen of the services it queries. The User-Agent names the project and its repository.
+Native scanner subprocesses use their own network clients; configure their egress through the tools
+container or scanner-specific settings. The backend proxy and rate limiter do not automatically govern them.
 
 ## Respecting sources
 

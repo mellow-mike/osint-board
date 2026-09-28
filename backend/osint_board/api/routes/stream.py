@@ -14,6 +14,7 @@ import json
 import re
 from typing import Any
 
+import anyio
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from osint_board.logging import get_logger
@@ -23,6 +24,7 @@ log = get_logger(__name__)
 
 #: How long one pub/sub read waits before looping (keeps reads below the client's socket timeout).
 POLL_S = 1.0
+CLEANUP_TIMEOUT_S = 5.0
 _BATCH_WITH_LAYER = re.compile(r'^\s*\{\s*"t"\s*:\s*"batch"\s*,\s*"layer"\s*:')
 
 
@@ -57,14 +59,23 @@ async def stream(ws: WebSocket) -> None:
         return
     pubsub = redis.pubsub()
     try:
+        await _forward(ws, pubsub, layers)
+    finally:
+        # Cancellation can arrive during subscription, polling, or client disconnect.
+        # AnyIO cancellation repeats at every checkpoint; shield the actual Redis
+        # disconnect, but never let an unresponsive close hold up server shutdown.
+        with anyio.move_on_after(CLEANUP_TIMEOUT_S, shield=True), contextlib.suppress(Exception):
+            await pubsub.aclose()
+
+
+async def _forward(ws: WebSocket, pubsub: Any, layers: list[str]) -> None:
+    try:
         if layers:
             await pubsub.subscribe(*(f"layer:{lyr}" for lyr in layers))
         else:
             await pubsub.psubscribe("layer:*")
     except Exception as exc:  # noqa: BLE001 - Redis went away between the ping and the subscribe
         log.warning("stream.subscribe_failed", error_type=type(exc).__name__, error=str(exc))
-        with contextlib.suppress(Exception):
-            await pubsub.aclose()
         await ws.send_json({"type": "error", "message": "live stream unavailable"})
         await ws.close(code=1011)
         return
@@ -83,8 +94,9 @@ async def stream(ws: WebSocket) -> None:
     receive_task = asyncio.create_task(receive())
     try:
         done, _ = await asyncio.wait({pump_task, receive_task}, return_when=asyncio.FIRST_COMPLETED)
-        exc = pump_task.exception() if pump_task in done else None
-        if pump_task in done and not isinstance(exc, WebSocketDisconnect):
+        pump_ended = pump_task in done and not pump_task.cancelled()
+        exc = pump_task.exception() if pump_ended else None
+        if pump_ended and not isinstance(exc, WebSocketDisconnect):
             # the Redis side died: tell the client and close with 1011 so it reconnects instead of sitting silent
             log.warning(
                 "stream.pump_failed",
@@ -97,8 +109,9 @@ async def stream(ws: WebSocket) -> None:
             with contextlib.suppress(Exception):
                 await ws.close(code=1011)
     finally:
-        pump_task.cancel()
-        receive_task.cancel()
-        await asyncio.gather(pump_task, receive_task, return_exceptions=True)
-        with contextlib.suppress(Exception):
-            await pubsub.aclose()
+        # Do not let the connection's cancelled scope interrupt the child-task join.
+        # A second cancellation here used to escape teardown and skip Redis close.
+        with anyio.move_on_after(CLEANUP_TIMEOUT_S, shield=True):
+            pump_task.cancel()
+            receive_task.cancel()
+            await asyncio.gather(pump_task, receive_task, return_exceptions=True)

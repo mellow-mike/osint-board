@@ -29,6 +29,7 @@ dependencies = [
   "sgp4>=2.23",
   "python-dateutil>=2.9",
   "websockets>=12",
+  "adblock>=0.6",
 ]
 
 [project.optional-dependencies]

@@ -1,5 +1,9 @@
 # OSINT Board documentation
 
+The catalog contains 239 modules. All 152 modules assigned to phases 1–2 are implemented with offline tests;
+74 remain planned and 13 upstream entries are retired. See the [roadmap](09-roadmap.md) for operational
+validation and the feed-soak status, and [deployment](08-deployment.md) to enable the optional tools worker.
+
 | Doc | What it covers |
 |---|---|
 | [00-scope.md](00-scope.md) | Vision, goals, non-goals, users, principles, success criteria |

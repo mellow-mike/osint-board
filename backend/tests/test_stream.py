@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+from types import SimpleNamespace
 
+import anyio
 import pytest
 from starlette.testclient import TestClient
-from starlette.websockets import WebSocketDisconnect
+from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from osint_board.api.app import create_app
 from osint_board.api.routes import stream
@@ -106,6 +108,7 @@ def test_stream_without_layers_subscribes_to_every_layer(client):
     with client.websocket_connect("/api/stream") as ws:
         assert ws.receive_json()["layer"] == "news"
     assert pubsub.patterns == ["layer:*"]
+    assert pubsub.closed
 
 
 def test_dead_redis_pump_closes_the_socket_with_1011(client):
@@ -130,3 +133,67 @@ def test_stream_without_redis_reports_and_closes(client):
         with pytest.raises(WebSocketDisconnect) as closed:
             ws.receive_text()
     assert closed.value.code == 1011
+
+
+@pytest.mark.parametrize("phase", ["subscribe", "pump", "close"])
+async def test_stream_closes_pubsub_when_its_cancel_scope_is_cancelled(phase):
+    """Server shutdown/TestClient teardown may cancel at every checkpoint, including cleanup awaits."""
+    ready = asyncio.Event()
+    pump_finished = asyncio.Event()
+
+    class CancellablePubSub(FakePubSub):
+        async def psubscribe(self, *patterns):
+            await super().psubscribe(*patterns)
+            if phase == "subscribe":
+                ready.set()
+                await asyncio.Event().wait()
+
+        async def get_message(self, **kwargs):
+            if phase == "pump":
+                ready.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                pump_finished.set()
+
+        async def aclose(self):
+            # A real Redis close yields while disconnecting; cleanup must survive that checkpoint.
+            if phase == "close":
+                ready.set()
+            await anyio.sleep(0)
+            await super().aclose()
+
+    pubsub = CancellablePubSub([])
+
+    async def ensure_redis():
+        return FakeRedis(pubsub)
+
+    connected = False
+
+    async def receive():
+        nonlocal connected
+        if not connected:
+            connected = True
+            return {"type": "websocket.connect"}
+        if phase == "close":
+            return {"type": "websocket.disconnect", "code": 1000}
+        await asyncio.Event().wait()
+
+    async def send(message):
+        pass
+
+    app = SimpleNamespace(state=SimpleNamespace(osint=SimpleNamespace(ensure_redis=ensure_redis)))
+    ws = WebSocket({"type": "websocket", "app": app, "query_string": b""}, receive, send)
+    with anyio.fail_after(1):
+        with anyio.CancelScope() as scope:
+
+            async def cancel_when_ready():
+                await ready.wait()
+                scope.cancel()
+
+            cancel = asyncio.create_task(cancel_when_ready())
+            await stream.stream(ws)
+        await cancel
+    assert pubsub.closed
+    if phase != "subscribe":
+        assert pump_finished.is_set()

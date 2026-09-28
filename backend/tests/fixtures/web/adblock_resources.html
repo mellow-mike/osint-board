@@ -1,0 +1,26 @@
+<!doctype html>
+<base href="https://cdn.example/assets/">
+<base href="https://ignored.example/">
+<link rel="stylesheet" href="main.css#first">
+<link rel="stylesheet" href="main.css#second">
+<link rel="shortcut icon" href="favicon.ico">
+<link rel="modulepreload" href="main.js">
+<link rel="preload" as="font" href="text.woff2">
+<link rel="canonical" href="https://canonical.example/">
+<link rel="alternate" href="https://alternate.example/">
+<link rel="dns-prefetch" href="https://dns.example/">
+<object data="plugin.swf"></object>
+<video poster="poster.png"><source src="clip.mp4"></video>
+<input type="image" src="button.png">
+<img src="#fragment">
+<img src="http://[bad">
+<img src="https://bad.example:wrong/image.png">
+<img src="https://bad.example:99999/image.png">
+<img src="https://bad host.example/image.png">
+<img src="data:image/png;base64,x">
+<script src="javascript:alert(1)"></script>
+<template>
+  <img src="inert.png">
+  <template><script src="also-inert.js"></script></template>
+</template>
+<script src="after-template.js"></script>

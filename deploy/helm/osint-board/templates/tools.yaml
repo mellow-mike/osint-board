@@ -1,0 +1,36 @@
+{{- if .Values.tools.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "osint.name" . }}-tools
+  labels: {{- include "osint.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tools
+spec:
+  replicas: {{ .Values.tools.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "osint.name" . }}
+      app.kubernetes.io/component: tools
+  template:
+    metadata:
+      labels: {{- include "osint.labels" . | nindent 8 }}
+        app.kubernetes.io/component: tools
+    spec:
+      initContainers:
+        - name: migrate
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          command: ["alembic", "upgrade", "head"]
+          {{- include "osint.env" . | nindent 10 }}
+      containers:
+        - name: tools
+          image: "{{ default (printf "%s-tools" .Values.image.repository) .Values.tools.image.repository }}:{{ default .Values.image.tag .Values.tools.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["osint-board", "worker", "--queue", "tools"]
+          {{- include "osint.env" . | nindent 10 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add: ["NET_RAW"]
+          resources: {{- toYaml .Values.tools.resources | nindent 12 }}
+{{- end }}

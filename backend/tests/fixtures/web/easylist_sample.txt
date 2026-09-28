@@ -1,0 +1,5 @@
+[Adblock Plus 2.0]
+! a trimmed sample of EasyList rules for the offline test
+||ads.tracker.example^
+||trackers.example/ads.
+@@||ads.tracker.example/whitelist^

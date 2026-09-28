@@ -727,3 +727,256 @@ async def test_cross_referencer_ignores_an_offsite_redirect(registry, fixtures_d
 
     mod._fetch = fake_fetch
     assert [e async for e in mod.lookup(EntityRef(EntityType.DOMAIN, "parked-candidate.example"))] == []
+
+
+# ---- adblock_check: EasyList/EasyPrivacy matcher (adblock-rs bindings) ---------------------------------------------
+
+
+def test_resource_links_extracts_fetch_candidates_only(fixtures_dir):
+    from osint_board.modules.impl.adblock_check import resource_links
+
+    html = (fixtures_dir / "web" / "adblock_sample.html").read_text()
+    hits = resource_links(html, "https://victim.example/")
+    kinds = {rtype for rtype, _ in hits}
+    assert kinds == {"stylesheet", "script", "image", "subdocument"}
+    urls = {url for _, url in hits}
+    assert {
+        "https://victim.example/assets/main.css",
+        "https://trackers.example/ads.css",
+        "https://cdn.widgets.example/w.js",
+        "https://victim.example/img/logo.png",
+        "https://ads.tracker.example/pixel.gif",
+        "https://player.kubernetes.example/embed",
+    } == urls  # data:/# fragment refs are not fetch candidates
+
+
+async def test_adblock_lookup_reports_blocked_subresources(registry, fake_http, fixtures_dir):
+    from osint_board.modules.impl import adblock_check
+
+    adblock_check.CACHE.clear()  # rules cache is process-wide: tests swap rule sets around
+    fake_http.route(
+        "rules.example/easylist.txt", file="web/easylist_sample.txt", headers={"content-type": "text/plain"}
+    )
+    fake_http.route(
+        "victim.example/",
+        body=(fixtures_dir / "web" / "adblock_sample.html").read_text(),
+        headers={"content-type": "text/html"},
+    )
+    mod = registry.instantiate("adblock_check", config={"lists": {"easylist": "https://rules.example/easylist.txt"}})
+    emits = [e async for e in mod.lookup(EntityRef(EntityType.URL, "https://victim.example/"))]
+    assert len(emits) == 1
+    verdict = emits[0]
+    assert verdict.type is EntityType.VERDICT
+    assert verdict.meta["label"] == "2/6 sub-resources blocked"
+    blocked = {b["url"] for b in verdict.meta["blocked"]}
+    assert blocked == {
+        "https://ads.tracker.example/pixel.gif",
+        "https://trackers.example/ads.css",
+    }
+    assert verdict.meta["lists"] == ["easylist"] and verdict.meta["failed_lists"] == []
+    assert fake_http.urls() == ["https://rules.example/easylist.txt", "https://victim.example/"]
+
+
+async def test_adblock_lookup_clean_page_is_a_non_result(registry, fake_http, fixtures_dir):
+    from osint_board.modules.impl import adblock_check
+
+    adblock_check.CACHE.clear()
+    fake_http.route(
+        "rules.example/easylist.txt", file="web/easylist_sample.txt", headers={"content-type": "text/plain"}
+    )
+    fake_http.route(
+        "victim.example/",
+        body="<html><img src='/logo.png'></html>",
+        headers={"content-type": "text/html"},
+    )
+    mod = registry.instantiate("adblock_check", config={"lists": {"easylist": "https://rules.example/easylist.txt"}})
+    assert [e async for e in mod.lookup(EntityRef(EntityType.URL, "https://victim.example/"))] == []
+
+
+async def test_adblock_lookup_raises_when_every_list_is_down(registry, fake_http):
+    from osint_board.modules.impl import adblock_check
+
+    adblock_check.CACHE.clear()
+    mod = registry.instantiate(
+        "adblock_check",
+        config={"lists": {"one": "https://rules.example/a.txt", "two": "https://rules.example/b.txt"}},
+    )
+    with pytest.raises(RuntimeError, match="every filter-list download failed"):
+        [e async for e in mod.lookup(EntityRef(EntityType.URL, "https://victim.example/"))]
+
+
+def test_resource_links_resolves_base_and_classifies_fetching_relations(fixtures_dir):
+    from osint_board.modules.impl.adblock_check import resource_links
+
+    html = (fixtures_dir / "web" / "adblock_resources.html").read_text()
+    assert resource_links(html, "https://site.example/pages/index.html") == [
+        ("stylesheet", "https://cdn.example/assets/main.css"),
+        ("image", "https://cdn.example/assets/favicon.ico"),
+        ("script", "https://cdn.example/assets/main.js"),
+        ("font", "https://cdn.example/assets/text.woff2"),
+        ("object", "https://cdn.example/assets/plugin.swf"),
+        ("image", "https://cdn.example/assets/poster.png"),
+        ("media", "https://cdn.example/assets/clip.mp4"),
+        ("image", "https://cdn.example/assets/button.png"),
+        ("script", "https://cdn.example/assets/after-template.js"),
+    ]
+
+
+@pytest.mark.parametrize("base", ['<base href="http://[bad">', '<base href="">'])
+def test_resource_links_invalid_or_empty_first_base_uses_document_url(base):
+    from osint_board.modules.impl.adblock_check import resource_links
+
+    html = base + '<base href="https://ignored.example/"><img src="logo.png">'
+    assert resource_links(html, "https://site.example/pages/index.html") == [
+        ("image", "https://site.example/pages/logo.png")
+    ]
+
+
+async def test_adblock_respects_exceptions_resource_types_domains_and_third_party(registry, fake_http, fixtures_dir):
+    from osint_board.modules.impl import adblock_check
+
+    adblock_check.CACHE.clear()
+    fake_http.route("rules.example/options.txt", file="web/adblock_options.txt", headers={"content-type": "text/plain"})
+    mod = registry.instantiate("adblock_check", config={"lists": {"options": "https://rules.example/options.txt"}})
+
+    async def redirected_fetch(url):
+        return "https://landing.example/page", (fixtures_dir / "web" / "adblock_options.html").read_text()
+
+    mod._fetch = redirected_fetch
+    emits = [e async for e in mod.lookup(EntityRef(EntityType.URL, "https://original.example/"))]
+    assert len(emits) == 1
+    assert emits[0].meta["url"] == "https://landing.example/page"
+    assert emits[0].meta["blocked"] == [
+        {"url": "https://assets.example/blocked.js", "type": "script"},
+        {"url": "https://assets.example/tracker.png", "type": "image"},
+        {"url": "https://assets.example/frame", "type": "subdocument"},
+        {"url": "https://third.example/app.js", "type": "script"},
+        {"url": "https://scoped.example/app.js", "type": "script"},
+    ]
+
+
+@pytest.mark.parametrize("ctype", ["text/plain", "text/html-invalid", "application/json", "image/svg+xml"])
+async def test_adblock_ignores_non_html_pages(registry, fake_http, ctype):
+    from osint_board.modules.impl import adblock_check
+
+    adblock_check.CACHE.clear()
+    fake_http.route("rules.example/list.txt", body="||tracker.example^")
+    fake_http.route("site.example/", body='<img src="https://tracker.example/x">', headers={"content-type": ctype})
+    mod = registry.instantiate("adblock_check", config={"lists": {"test": "https://rules.example/list.txt"}})
+    assert [e async for e in mod.lookup(EntityRef(EntityType.URL, "https://site.example/"))] == []
+
+
+@pytest.mark.parametrize("status", [301, 404, 503])
+async def test_adblock_ignores_error_and_unresolved_redirect_pages(registry, fake_http, status):
+    from osint_board.modules.impl import adblock_check
+
+    adblock_check.CACHE.clear()
+    fake_http.route("rules.example/list.txt", body="||tracker.example^")
+    fake_http.route(
+        "site.example/",
+        body='<img src="https://tracker.example/x">',
+        status=status,
+        headers={"content-type": "text/html"},
+    )
+    mod = registry.instantiate("adblock_check", config={"lists": {"test": "https://rules.example/list.txt"}})
+    assert [e async for e in mod.lookup(EntityRef(EntityType.URL, "https://site.example/"))] == []
+
+
+@pytest.mark.parametrize(
+    "url", ["data:text/html,foo", "file:///tmp/page", "https://[bad", "https://host:wrong/", "https:///"]
+)
+async def test_adblock_rejects_invalid_targets_without_fetching(registry, fake_http, url):
+    mod = registry.instantiate("adblock_check")
+    assert [e async for e in mod.lookup(EntityRef(EntityType.URL, url))] == []
+    assert fake_http.calls == []
+
+
+@pytest.mark.parametrize("lists", [{}, [], {"bad": "file:///tmp/list"}, {"bad": 123}])
+async def test_adblock_rejects_invalid_list_configuration(registry, fake_http, lists):
+    mod = registry.instantiate("adblock_check", config={"lists": lists})
+    with pytest.raises(ValueError, match="adblock_check:"):
+        [e async for e in mod.lookup(EntityRef(EntityType.URL, "https://site.example/"))]
+    assert fake_http.calls == []
+
+
+@pytest.mark.parametrize(
+    ("body", "ctype", "status"),
+    [("<html>upstream failure</html>", "text/html", 200), ("", "text/plain", 200), ("failure", "text/plain", 503)],
+)
+async def test_adblock_rejects_failed_or_non_list_downloads(registry, fake_http, body, ctype, status):
+    from osint_board.modules.impl import adblock_check
+
+    adblock_check.CACHE.clear()
+    fake_http.route("rules.example/list.txt", body=body, status=status, headers={"content-type": ctype})
+    mod = registry.instantiate("adblock_check", config={"lists": {"test": "https://rules.example/list.txt"}})
+    with pytest.raises(RuntimeError, match="every filter-list download failed"):
+        [e async for e in mod.lookup(EntityRef(EntityType.URL, "https://site.example/"))]
+
+
+async def test_adblock_partial_rule_failure_reports_provenance_and_retries(registry, fake_http):
+    from osint_board.modules.impl import adblock_check
+
+    adblock_check.CACHE.clear()
+    fake_http.route("rules.example/one.txt", body="||tracker.example^")
+    fake_http.route(
+        "site.example/", body='<img src="https://tracker.example/x">', headers={"content-type": "text/html"}
+    )
+    mod = registry.instantiate(
+        "adblock_check",
+        config={"lists": {"one": "https://rules.example/one.txt", "two": "https://rules.example/two.txt"}},
+    )
+    target = EntityRef(EntityType.URL, "https://site.example/")
+    partial = [e async for e in mod.lookup(target)]
+    assert partial[0].meta["lists"] == ["one"] and partial[0].meta["failed_lists"] == ["two"]
+    fake_http.route("rules.example/two.txt", body="||other.example^")
+    recovered = [e async for e in mod.lookup(target)]
+    assert recovered[0].meta["lists"] == ["one", "two"] and recovered[0].meta["failed_lists"] == []
+    assert fake_http.urls().count("https://rules.example/two.txt") == 2
+
+
+async def test_adblock_rule_cache_expires_and_separates_configured_lists(registry, fake_http, monkeypatch):
+    from types import SimpleNamespace
+
+    from osint_board.modules.impl import adblock_check
+
+    adblock_check.CACHE.clear()
+    now = 10.0
+    monkeypatch.setattr(adblock_check, "time", SimpleNamespace(monotonic=lambda: now))
+    fake_http.route("rules.example/one.txt", body="||tracker.example^")
+    fake_http.route("rules.example/two.txt", body="@@||tracker.example^")
+    fake_http.route(
+        "site.example/", body='<img src="https://tracker.example/x">', headers={"content-type": "text/html"}
+    )
+    one = registry.instantiate("adblock_check", config={"lists": {"test": "https://rules.example/one.txt"}, "ttl": 60})
+    two = registry.instantiate("adblock_check", config={"lists": {"test": "https://rules.example/two.txt"}, "ttl": 60})
+    target = EntityRef(EntityType.URL, "https://site.example/")
+    assert len([e async for e in one.lookup(target)]) == 1
+    assert len([e async for e in one.lookup(target)]) == 1
+    assert fake_http.urls().count("https://rules.example/one.txt") == 1
+    assert [e async for e in two.lookup(target)] == []
+    now += 60
+    assert len([e async for e in one.lookup(target)]) == 1
+    assert fake_http.urls().count("https://rules.example/one.txt") == 2
+
+
+async def test_adblock_concurrent_lookups_share_one_rules_download():
+    import asyncio
+    from types import SimpleNamespace
+
+    import httpx
+
+    from osint_board.modules.impl.adblock_check import _EngineCache
+
+    cache = _EngineCache()
+    downloads = []
+
+    async def get(url, **kwargs):
+        downloads.append(url)
+        await asyncio.sleep(0)  # let the second caller arrive while the first fetch is in progress
+        return httpx.Response(200, text="||tracker.example^", request=httpx.Request("GET", url))
+
+    http = SimpleNamespace(get=get)
+    lists = (("test", "https://rules.example/list.txt"),)
+    engines = await asyncio.gather(cache.get(http, lists, 60), cache.get(http, lists, 60))
+    assert engines[0] is engines[1]
+    assert downloads == ["https://rules.example/list.txt"]

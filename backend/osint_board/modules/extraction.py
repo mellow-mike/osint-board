@@ -34,10 +34,17 @@ def _identity(etype: EntityType, value: str) -> tuple[EntityType, str]:
 
 def content_of(emit: Emit) -> Content | None:
     """What an extractor reads from an emission: ``raw_content`` carries its text in ``meta["text"]``; other types
-    (URLs, phone numbers, addresses, WHOIS and DNS records) are scanned by their value."""
+    (URLs, phone numbers, addresses, WHOIS and DNS records) are scanned by their value. ``raw_file`` needs actual
+    bytes or byte-preserving text in metadata: a file URL alone is a reference, not downloaded content."""
     ref = EntityRef(emit.type, emit.value)
-    if emit.type is EntityType.RAW_CONTENT:
+    if emit.type in (EntityType.RAW_CONTENT, EntityType.RAW_FILE):
         text = emit.meta.get("text")
+        if emit.type is EntityType.RAW_FILE:
+            raw = emit.meta.get("bytes")
+            if isinstance(raw, (bytes, bytearray)):
+                text = bytes(raw[:MAX_CHARS]).decode("latin-1")
+            elif not isinstance(text, str):
+                return None
         if not text:
             return None
         source = emit.meta.get("url")
@@ -84,10 +91,10 @@ class ExtractorPipeline:
                 ident = _identity(emit.type, emit.value)
                 if not mods or ident in scanned:
                     continue
-                scanned.add(ident)
                 content = content_of(emit)
                 if content is None:
                     continue
+                scanned.add(ident)
                 for mod in mods:
                     try:
                         results = list(mod.extract(content))
