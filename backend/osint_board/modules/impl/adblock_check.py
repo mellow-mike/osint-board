@@ -38,6 +38,7 @@ from osint_board.modules.helpers import verdict
 from osint_board.modules.http import HttpClient
 from osint_board.modules.registry import module
 from osint_board.modules.types import Emit, EntityRef
+from osint_board.modules.web_files import fetch_sample
 
 #: Freely-downloadable filter lists loaded by default (the ones AdBlock Plus itself subscribes to).
 _DEFAULT_LISTS: tuple[tuple[str, str], ...] = (
@@ -230,16 +231,17 @@ class AdBlockCheck(LookupModule):
 
     async def _fetch(self, url: str) -> tuple[str, str] | None:
         try:
-            resp = await self.ctx.http.get(url, retries=1, timeout=20)
+            # Bound the download itself; the parser's character slice cannot limit a buffered response.
+            sample = await fetch_sample(self.ctx, url, max_bytes=MAX_CHARS, max_redirects=20, same_origin_only=False)
         except Exception as exc:  # noqa: BLE001 - a dead page is a non-result, not a crash
             self.log.info("adblock_check.fetch_failed", url=url, error=str(exc))
             return None
-        if not resp.is_success:
+        if sample is None or not 200 <= sample.status < 300:
             return None
-        ctype = resp.headers.get("content-type", "").split(";")[0].strip().lower()
+        ctype = sample.content_type
         if ctype and ctype not in {"text/html", "application/xhtml+xml"}:
             return None
-        return str(resp.url), resp.text
+        return sample.url, sample.text
 
     async def lookup(self, target: EntityRef) -> AsyncIterator[Emit]:
         url = _http_url("", target.value)

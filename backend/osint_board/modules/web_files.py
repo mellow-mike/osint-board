@@ -78,12 +78,14 @@ async def fetch_sample(
     *,
     max_bytes: int,
     max_redirects: int = 0,
+    same_origin_only: bool = True,
 ) -> WebSample | None:
     """Read at most ``max_bytes`` from the shared proxy-aware, rate-limited HTTP pool.
 
     A Range request reduces traffic where supported; streaming enforces the bound even when ignored. Redirects
-    are handled manually and cannot change origin (except a same-host HTTPS upgrade). Active scope is rechecked
-    before each hop. Transport failures propagate; callers decide whether a failed baseline can be used.
+    are handled manually and, by default, cannot change origin (except a same-host HTTPS upgrade). Active scope
+    is rechecked before each hop, even with ``same_origin_only=False``. Transport failures propagate; callers
+    decide whether a failed baseline can be used.
     """
     origin = web_url(url)
     if not origin:
@@ -109,7 +111,7 @@ async def fetch_sample(
                 raise RetryLater(f"{ctx.spec.id}: HTTP {response.status_code} requested a retry delay", wait)
             if response.status_code in (301, 302, 303, 307, 308):
                 redirect = web_url(response.headers.get("location", ""), current)
-                if not redirect or not same_origin(redirect, origin):
+                if not redirect or (same_origin_only and not same_origin(redirect, origin)):
                     return None
                 current = redirect
                 continue

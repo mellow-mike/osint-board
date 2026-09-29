@@ -5,10 +5,12 @@ lookup is answered by ``fake_dns`` and page fetches by ``fake_http``. No real ne
 
 from __future__ import annotations
 
+import httpx
 import pytest
 
 from osint_board.entities.types import EntityType
 from osint_board.modules.base import Scope
+from osint_board.modules.http import HttpClient, TokenBucket
 from osint_board.modules.impl.cross_referencer import linked_sites
 from osint_board.modules.impl.page_info import Form, analyze_page
 from osint_board.modules.impl.similar_domains import permutations, split_domain
@@ -732,6 +734,67 @@ async def test_cross_referencer_ignores_an_offsite_redirect(registry, fixtures_d
 # ---- adblock_check: EasyList/EasyPrivacy matcher (adblock-rs bindings) ---------------------------------------------
 
 
+@pytest.fixture
+async def adblock_http(fake_http, monkeypatch):
+    async def acquire(self):
+        pass
+
+    monkeypatch.setattr(TokenBucket, "acquire", acquire)
+    transport = httpx.MockTransport(
+        lambda request: fake_http.respond(request.method, str(request.url), headers=request.headers)
+    )
+    async with httpx.AsyncClient(transport=transport) as client:
+        monkeypatch.setattr(HttpClient, "_pool", client)
+        yield fake_http
+
+
+@pytest.mark.parametrize("content_length", [None, "1", "1000000000"])
+async def test_adblock_fetch_bounds_download_and_closes_stream(registry, monkeypatch, content_length):
+    from osint_board.modules.impl.adblock_check import MAX_CHARS
+
+    class Stream(httpx.AsyncByteStream):
+        downloaded = 0
+        closed = False
+
+        async def __aiter__(self):
+            # A server ignoring Range must be stopped without relying on Content-Length.
+            for _ in range(10000):
+                self.downloaded += 1024
+                yield b"x" * 1024
+            pytest.fail("oversized response was consumed in full")
+
+        async def aclose(self):
+            self.closed = True
+
+    stream = Stream()
+    headers = {"content-type": "text/html"}
+    if content_length is not None:
+        headers["content-length"] = content_length
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, stream=stream, headers=headers))
+    async with httpx.AsyncClient(transport=transport) as client:
+        monkeypatch.setattr(HttpClient, "_pool", client)
+        mod = registry.instantiate("adblock_check")
+        result = await mod._fetch("https://site.example/")
+    assert result == ("https://site.example/", "x" * MAX_CHARS)
+    assert MAX_CHARS < stream.downloaded <= MAX_CHARS + 65536 + 1024
+    assert stream.closed
+
+
+async def test_adblock_fetch_preserves_redirect_url_and_charset(registry, adblock_http):
+    adblock_http.route("original.example/", status=302, headers={"location": "https://landing.example/page"})
+    adblock_http.route(
+        "landing.example/page",
+        body=b'<img src="caf\xe9.png">',
+        headers={"content-type": "Text/HTML; charset=iso-8859-1"},
+    )
+    mod = registry.instantiate("adblock_check")
+    assert await mod._fetch("https://original.example/") == (
+        "https://landing.example/page",
+        '<img src="café.png">',
+    )
+    assert adblock_http.urls() == ["https://original.example/", "https://landing.example/page"]
+
+
 def test_resource_links_extracts_fetch_candidates_only(fixtures_dir):
     from osint_board.modules.impl.adblock_check import resource_links
 
@@ -750,7 +813,7 @@ def test_resource_links_extracts_fetch_candidates_only(fixtures_dir):
     } == urls  # data:/# fragment refs are not fetch candidates
 
 
-async def test_adblock_lookup_reports_blocked_subresources(registry, fake_http, fixtures_dir):
+async def test_adblock_lookup_reports_blocked_subresources(registry, fake_http, fixtures_dir, adblock_http):
     from osint_board.modules.impl import adblock_check
 
     adblock_check.CACHE.clear()  # rules cache is process-wide: tests swap rule sets around
@@ -777,7 +840,7 @@ async def test_adblock_lookup_reports_blocked_subresources(registry, fake_http, 
     assert fake_http.urls() == ["https://rules.example/easylist.txt", "https://victim.example/"]
 
 
-async def test_adblock_lookup_clean_page_is_a_non_result(registry, fake_http, fixtures_dir):
+async def test_adblock_lookup_clean_page_is_a_non_result(registry, fake_http, fixtures_dir, adblock_http):
     from osint_board.modules.impl import adblock_check
 
     adblock_check.CACHE.clear()
@@ -856,7 +919,7 @@ async def test_adblock_respects_exceptions_resource_types_domains_and_third_part
 
 
 @pytest.mark.parametrize("ctype", ["text/plain", "text/html-invalid", "application/json", "image/svg+xml"])
-async def test_adblock_ignores_non_html_pages(registry, fake_http, ctype):
+async def test_adblock_ignores_non_html_pages(registry, fake_http, ctype, adblock_http):
     from osint_board.modules.impl import adblock_check
 
     adblock_check.CACHE.clear()
@@ -867,7 +930,7 @@ async def test_adblock_ignores_non_html_pages(registry, fake_http, ctype):
 
 
 @pytest.mark.parametrize("status", [301, 404, 503])
-async def test_adblock_ignores_error_and_unresolved_redirect_pages(registry, fake_http, status):
+async def test_adblock_ignores_error_and_unresolved_redirect_pages(registry, fake_http, status, adblock_http):
     from osint_board.modules.impl import adblock_check
 
     adblock_check.CACHE.clear()
@@ -913,7 +976,7 @@ async def test_adblock_rejects_failed_or_non_list_downloads(registry, fake_http,
         [e async for e in mod.lookup(EntityRef(EntityType.URL, "https://site.example/"))]
 
 
-async def test_adblock_partial_rule_failure_reports_provenance_and_retries(registry, fake_http):
+async def test_adblock_partial_rule_failure_reports_provenance_and_retries(registry, fake_http, adblock_http):
     from osint_board.modules.impl import adblock_check
 
     adblock_check.CACHE.clear()
@@ -934,7 +997,9 @@ async def test_adblock_partial_rule_failure_reports_provenance_and_retries(regis
     assert fake_http.urls().count("https://rules.example/two.txt") == 2
 
 
-async def test_adblock_rule_cache_expires_and_separates_configured_lists(registry, fake_http, monkeypatch):
+async def test_adblock_rule_cache_expires_and_separates_configured_lists(
+    registry, fake_http, monkeypatch, adblock_http
+):
     from types import SimpleNamespace
 
     from osint_board.modules.impl import adblock_check
