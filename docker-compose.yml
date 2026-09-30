@@ -135,11 +135,19 @@ services:
     environment:
       OSINT_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-osint}:${POSTGRES_PASSWORD:-osint}@db:5432/${POSTGRES_DB:-osint}
       OSINT_REDIS_URL: redis://redis:6379/0
+      OSINT_MEILI_URL: http://meilisearch:7700
+      OSINT_MEILI_KEY: ${MEILI_MASTER_KEY:-osint-dev-master-key}
       OSINT_CATALOG_DIR: /app/catalog
     command: ["osint-board", "worker", "--queue", "tools"]
-    cap_add: ["NET_RAW", "NET_ADMIN"]   # nmap SYN scans; drop if you only run passive modules
+    cap_add: ["NET_RAW"]   # nmap raw-packet scans; drop if you only run passive modules
+    cpus: 2
+    mem_limit: 2g
+    pids_limit: 256
     depends_on:
+      db: { condition: service_healthy }
       redis: { condition: service_healthy }
+      meilisearch: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
     restart: unless-stopped
 
   searxng:

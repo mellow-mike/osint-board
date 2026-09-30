@@ -4,11 +4,14 @@ FROM python:3.12-slim-bookworm
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 DEBIAN_FRONTEND=noninteractive
 ARG NUCLEI_VERSION=3.3.7
 ARG TRUFFLEHOG_VERSION=3.88.0
+ARG WAPPALYZER_REVISION=20436693e89619e5e7eb5237576ec970ce688127
+ARG RETIREJS_VERSION=5.7.0
+
+COPY --from=node:22-bookworm-slim /usr/local/ /usr/local/
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl git unzip whois \
       nmap nbtscan onesixtyone whatweb \
-      nodejs npm \
       bsdmainutils procps openssl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -21,8 +24,15 @@ RUN curl -fsSL "https://github.com/projectdiscovery/nuclei/releases/download/v${
 # Shell / Python / Node tools
 RUN git clone --depth 1 https://github.com/drwetter/testssl.sh /opt/testssl.sh && ln -s /opt/testssl.sh/testssl.sh /usr/local/bin/testssl.sh \
     && git clone --depth 1 https://github.com/Tuhinshubhra/CMSeeK /opt/cmseek \
-    && pip install --no-cache-dir wafw00f dnstwist[full] snallygaster -r /opt/cmseek/requirements.txt \
-    && npm install -g retire
+    && pip install --no-cache-dir wafw00f dnstwist dnspython snallygaster -r /opt/cmseek/requirements.txt \
+    && npm install -g "retire@$RETIREJS_VERSION"
+
+# Only the maintained engine/data are needed. Our static HTTP runner has no npm
+# dependencies and never launches Chromium or executes page JavaScript.
+RUN git init /opt/wappalyzer \
+    && git -C /opt/wappalyzer remote add origin https://github.com/HTTPArchive/wappalyzer.git \
+    && git -C /opt/wappalyzer fetch --depth 1 origin "$WAPPALYZER_REVISION" \
+    && git -C /opt/wappalyzer checkout --detach FETCH_HEAD
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 WORKDIR /app

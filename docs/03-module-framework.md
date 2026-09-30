@@ -67,17 +67,21 @@ layers/services referenced exist, feeds have cadences, paid modules name a repla
    URLs, phone numbers, addresses and records by their value), and what they find is fed back in once more
    (a phone number on a page goes on to the country extractor). Findings keep the content they came from as
    `parent` and are stored under the extractor's id in the same run. `osint-board modules run` prints them too
-   (`--no-extract` to skip).
+   (`--no-extract` to skip). A URL-backed `raw_file` is a reference, not downloaded content: extractors wait
+   for actual `meta["text"]` or `meta["bytes"]` instead of interpreting its URL as file data.
 
 ## Authorisation and safety
 
 - `ModuleContext.check_authorized(target)` gates a module with `requires_authorization: true`. While
-  `OSINT_PASSIVE_ONLY` is on (`settings.passive_only`, the default) it raises unless `scope.allow_active` and the
-  target is inside `scope.targets` (domains or CIDRs); turning `OSINT_PASSIVE_ONLY` off opts the whole instance
+  `OSINT_PASSIVE_ONLY` is on (`settings.passive_only`, the default) it requires `scope.allow_active`; if
+  `scope.targets` is nonempty, the target must match one of those domains or CIDRs. An empty target list with
+  `allow_active=True` permits any target. Turning `OSINT_PASSIVE_ONLY` off opts the whole instance
   into active scanning and lifts the per-scope gate. Investigations carry the scope; the CLI has `--allow-active`.
   An active module also calls `check_authorized` itself at the top of `lookup`, so it is refused even when run
   directly, not only through the worker. The active modules today are `dns_bruteforce`, `dns_axfr`,
-  `port_scanner` and the `tool_*` scanners.
+  `port_scanner`, `junk_files` and the catalog-marked `tool_*` scanners. Passive tool adapters, including
+  DNSTwist's public DNS lookups and TruffleHog's repository analysis without credential verification, do not
+  require active scope.
 - `HttpClient` applies a token bucket per module (`rate_per_sec`), retries on 429/5xx with backoff, honours
   `Retry-After` (seconds or HTTP date) and `X-Rate-Limit-Retry-After-Seconds` up to 2 min (a longer ask returns
   the response to the module instead of sleeping), sends a stable User-Agent and routes through
@@ -115,6 +119,8 @@ Most free sources are variations on four patterns, so the modules built on them 
 | `rdap.py` | RDAP (RFC 9083) client/parser: `parse_rdap` → `record_emits` (networks, ASNs, contacts, addresses) | ARIN, WHOIS (RDAP first, port 43 fallback) |
 | `http.py` | rate-limited `HttpClient` with `get_json_or_none` (404 → nothing known), `post_json`, `stream_bytes` (multi-GB dumps), a Tor pool (`tor=True`) and `retry_after()` | everything |
 | `adsb.py` | the in-process seed of the `adsb_network` service: readsb/OpenSky parsers, merge by ICAO24, the 250 nm world tile grid and adaptive scheduler, per-provider pacing (1 req/s cap, halved on 429) and breakers, OpenSky OAuth2 + credit budget | `opensky` |
+| `web_files.py` | bounded HTTP samples, validated web URLs, controlled redirects and origin checks | `interesting_files`, `junk_files` |
+| `subproc.py` | shell-free scanner execution, `OSINT_` variables removed from child environments, timeout/cancellation cleanup of the process group, explicit missing-binary errors | `tool_*` adapters |
 
 Conventions the helpers assume:
 
@@ -157,11 +163,36 @@ nameserver), `run_lookup` and `run_poll` (instantiate a module from the registry
 | `dns_srv` | lookup (internal) | Brute-forcing well-known `_service._proto` SRV names; pure name/rdata parsing, resolves each target |
 | `ssl_analyzer` | lookup (internal) | TLS certificate analysis over the stdlib `ssl` dict (no `cryptography` dep); network fetch isolated for offline tests |
 | `file_metadata` | lookup (internal) | Hand-rolled EXIF/TIFF + PDF `/Info` parsing straight from bytes; GPS tags become exact-precision media-layer points |
+| `cross_referencer` | lookup (internal) | A candidate page's links back to configured investigation domains provide affiliate evidence; redirects off the candidate's site are ignored |
+| `interesting_files` | lookup (internal) | Documents and archives linked from a page become URL-backed `raw_file` references for later metadata extraction; linked files are not downloaded |
+| `junk_files` | lookup (active) | Bounded same-origin backup-file probes with negative controls for soft 404s; records URL evidence without storing response bodies |
+| `adblock_check` | lookup (local replacement) | Cached EasyList/EasyPrivacy rules matched against static HTML subresources, including request types and rule exceptions |
+| `tool_dnstwist` | lookup (tool) | Registered similar domains and IPs parsed from scanner JSON; public DNS only |
+| `tool_trufflehog` | lookup (tool) | Repository secret candidates become SHA-256 fingerprints plus source locations; raw credentials are discarded and verification is disabled |
+
+## External tools
+
+The API routes `source_type: tool` modules to the `osint:tools` queue. Run the separate worker with
+`docker compose --profile tools up -d --build tools`; the ordinary worker does not consume this queue.
+Every adapter has an offline output fixture and lookup tests that substitute the subprocess result. These
+tests establish parsing and invocation behavior; they do not replace a deployment smoke test of the actual
+scanner binaries. Missing tools fail the run with `ToolNotFound`.
+
+Tool output is untrusted evidence. TruffleHog findings retain a hash, detector and file/commit/line; `Raw`,
+`RawV2`, `Redacted` and scanner diagnostic output are never emitted. The adapter uses `--no-verification` so
+discovered credentials are not submitted to third-party services. It accepts public HTTP(S) repository URLs,
+without embedded credentials, query strings or fragments; canonical `code_repo` values such as
+`github.com/owner/repository` are scanned over HTTPS.
+
+The shared runner removes `OSINT_` environment variables and kills the scanner's process group on timeout or
+cancellation. This is process management, not a per-job security boundary: external tools run inside the
+worker container, and native scanner network traffic is not routed through the platform's `HttpClient`.
+Configure container isolation, resource limits and scanner-specific egress settings for the deployment.
 
 ## Retired upstreams
 
-Twelve free modules in the CSV point at services that no longer exist (Bing Search APIs, SORBS, ThreatCrowd,
-Crobat, Sublist3r API, PunkSpider, Riddler, RiskIQ community, CRXcavator, Trumail, Onion.link) or whose free
-access ended (Twitter, Clearbit). They stay in the catalog as `defunct`/`changed` with `replacement:` pointing
-at the internal service that provides the capability, and the registry reports them as `retired` so the UI
-never suggests them.
+Thirteen catalog entries are retired: the two Bing entries, Clearbit, Crobat, CRXcavator, Onion.link,
+PunkSpider, Riddler, RiskIQ, SORBS, Sublist3r API, ThreatCrowd and Trumail. They span free, tiered and commercial
+sources. A module is retired when `status: defunct` or `access: dead`; `status: changed` alone does not retire
+it. Retired entries retain their `replacement:` mapping and are excluded from module suggestions while the
+replacement services remain on the roadmap.

@@ -6,14 +6,13 @@ live vessel and aircraft tracking — is modelled in one catalog, wired through 
 everything with a location lands on the globe in the right place, at the right precision, with layer toggles
 and colour coding. A fast, type-aware search box is the entry point to every investigation.
 
-> Status: **phase 1 done, phase 2 in progress**. Every free API in the catalog that still exists is wired up and
-> all 109 phase-1 modules are implemented. Phase 2 opened with the two items phase 1 left open: **live aircraft
-> with no key** (the `opensky` module answering through the in-process `adsb_network` service from the adsb.lol
-> and adsb.fi community aggregators) and a **24-hour feed soak** (`make soak`, a soft gate run after every
-> milestone). 135 modules are implemented with offline fixture tests — including phase 2's internal recon
-> lookups (SRV discovery, TLD search, DNS look-aside, TLS-certificate analysis, custom threat feeds, account
-> finding across many sites, and EXIF/PDF file-metadata extraction). The remaining internal modules, external
-> tools and tiered replacements follow [docs/09-roadmap.md](docs/09-roadmap.md).
+> Status: **phase 1 complete; phase 2 implementation complete, operational validation ongoing**.
+> All 109 phase-1 and 43 phase-2 modules have implementations and offline tests: 152 of 239 catalog entries.
+> Phase 2 includes keyless live aircraft, internal recon and document analysis, EasyList/EasyPrivacy matching,
+> linked-file discovery, scoped backup-file probes, and all 13 external-tool adapters. External tools need the
+> optional `tools` worker image. A fresh 24-hour feed soak remains a soft operational gate; offline tests do
+> not establish a successful live scanner deployment or uninterrupted upstream availability.
+> The remaining 74 planned and 13 retired entries belong to phases 3–4; see [the roadmap](docs/09-roadmap.md).
 
 ## What it does
 
@@ -49,6 +48,7 @@ Details: [docs/01-architecture.md](docs/01-architecture.md).
 cp .env.example .env                      # optional: add any free API keys you have (everything runs without them)
 docker compose up -d --build              # db, redis, meilisearch, api, worker, feeds, web
 open http://localhost:8080                # globe; API docs at http://localhost:8000/api/docs
+docker compose --profile tools up -d --build tools   # optional external-tool worker
 ```
 
 Local development:

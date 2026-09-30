@@ -19,7 +19,12 @@ feeds:
 web:
   replicas: 2
 tools:
-  enabled: false  # nmap/nuclei runner; needs NET_RAW and an explicit legal review
+  enabled: false  # optional osint:tools worker; active modules still need an authorized scope
+  replicas: 1
+  image:
+    repository: ""  # defaults to <image.repository>-tools; build deploy/docker/tools.Dockerfile
+    tag: ""         # defaults to image.tag
+  resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { cpu: "2", memory: 2Gi } }
 
 ingress:
   enabled: true

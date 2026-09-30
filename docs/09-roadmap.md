@@ -43,23 +43,27 @@ Phase 2 opens with the two items carried over from phase 1:
    sink and feed modules were hardened for unattended runs alongside it.
 
 Then the rest of the phase: active internal modules (DNS brute force, zone transfer, port scanner,
-subdomain-takeover check) behind the authorisation gate; the 13 external tools in the `tools` worker image
+backup-file probing) behind the authorisation gate; passive domain and web recon; the 13 external tools in the `tools` worker image
 (nmap, nuclei, testssl, WhatWeb, WAFW00F, CMSeeK, Retire.js, TruffleHog, dnstwist, nbtscan, onesixtyone,
-snallygaster); file-metadata and document extractors.
+snallygaster and the community Wappalyzer engine); file-metadata and document extractors.
 
 **Exit:** live aircraft on the globe from free sources with no key; a 24 h soak report for the phase's final
 milestone (soft gate, below); an authorised-scope investigation can run active recon end to end; tools run
 sandboxed with output parsed into entities; passive-only mode provably refuses them.
-*Status:* in progress — live aircraft (`opensky` via `adsb_network`) and the soak harness are done; the first
-24 h soak was started with them. The document/content extractors are now implemented and tested: the web
+*Implementation status:* all 43 phase-2 modules are implemented with offline tests, bringing phases 1–2 to
+152 implemented modules. The remaining catalog entries are 74 planned and 13 retired modules in phases 3–4.
+Live aircraft (`opensky` via `adsb_network`) and the soak harness are implemented. Deployment smoke tests and
+the final milestone's 24 h soak remain operational validation, rather than being implied by parser tests.
+
+The document/content extractors are implemented and tested: the web
 server and framework identifiers, the cookie extractor, the error-string extractor, the company- and
 human-name extractors, the base64 decoder and the binary-string extractor — all pure, offline and wired into
 `ExtractorPipeline` (the base64 decoder and `binary_strings` re-feed their recovered text so the other
-extractors run over it). The four active internal recon modules are now implemented and gated: `dns_bruteforce`
+extractors run over it). The core internal recon modules are implemented: `dns_bruteforce`
 (wildcard-aware subdomain brute force), `dns_axfr` (zone transfer), `port_scanner` (TCP connect scan) and
 `subdomain_takeover` (dangling-CNAME check, itself passive). The first three go through `ctx.check_authorized`,
-which now honours `OSINT_PASSIVE_ONLY`: while it is on (the default) they are refused unless the investigation
-scope names the target; the catalog's `requires_authorization` was corrected so DNS brute force and zone
+which honours `OSINT_PASSIVE_ONLY`: while it is on (the default) they require active authorization, and any
+configured scope targets must include the requested target. The catalog's `requires_authorization` was corrected so DNS brute force and zone
 transfer are gated as the security policy always specified. The passive web/domain recon lookups are now
 implemented too and, reading only public DNS or content another module collected, stay ungated: `similar_domains`
 (a pure dnstwist-compatible permutation engine that resolves the look-alikes to report the registered ones),
@@ -85,10 +89,28 @@ because each reads only public DNS, the target's own certificate, or the operato
   camera/app/producer → `software`, capture/creation time → `timestamp`, and a photo's GPS tags → an
   *exact*-precision `geo_point` on the media layer; no exiftool or image library needed).
 
-Still open in phase 2: three internal web-recon lookups (`cross_referencer`, `interesting_files`, `junk_files`),
-`adblock_check` (an EasyList/EasyPrivacy filter-list matcher), and the 13 external tools in the `tools` worker
-image (nmap, nuclei, testssl, WhatWeb, WAFW00F, CMSeeK, Retire.js, TruffleHog, dnstwist, nbtscan, onesixtyone,
-snallygaster).
+The final phase-2 modules complete the recon workflow:
+
+- `cross_referencer` checks a candidate page for links back to investigation domains, using configured
+  `targets` or the investigation's scope targets. Redirecting to another site is not affiliate evidence.
+- `interesting_files` finds document/archive links and produces URL-backed file references. It can reuse
+  supplied markup or sample a page; it does not download linked documents.
+- `junk_files` requires active authorization before probing bounded backup/temporary paths. Negative controls
+  suppress soft 404s, redirects are not followed, and findings contain URL evidence without response bodies.
+- `adblock_check` matches static HTML resources against EasyList/EasyPrivacy with daily engine caching,
+  request types and exception rules. It fetches lists and the page, never the linked resources; failed lists
+  are identified in positive verdicts. No verdict means no supported static resource matched, not a complete
+  browser privacy assessment.
+- All 13 tool adapters parse captured output offline. DNSTwist resolves registered look-alikes; Retire.js
+  checks downloaded JavaScript; TruffleHog records secret fingerprints and locations with credential
+  verification disabled; the community Wappalyzer engine evaluates captured HTTP data without executing
+  JavaScript. Other adapters cover network, vulnerability, TLS, CMS and WAF findings. Tools run on the
+  separate `osint:tools` queue with timeout/cancellation cleanup and deployment resource limits.
+
+The existing `20260925T040645Z` soak report, from commit `8391a95`, recorded **FAIL** after a 65-minute GDELT
+success gap during missing upstream exports. It predates this milestone and is not evidence of a passing
+phase-2 exit. Record the fresh milestone soak's run directory and verdict in the PR; an in-progress run does
+not have a final verdict. See [deployment](08-deployment.md) for tool setup and known static-analysis limits.
 
 ### The 24-hour soak is a soft gate
 

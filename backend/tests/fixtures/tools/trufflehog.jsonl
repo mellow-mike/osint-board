@@ -1,0 +1,5 @@
+{"level":"info","msg":"scan complete"}
+{"SourceMetadata":{"Data":{"Git":{"commit":"0123456789abcdef","file":"config.env","line":4,"repository":"https://example.com/demo/repo","email":"maintainer@example.com"}}},"DetectorName":"ExampleToken","Verified":false,"Raw":"EXAMPLE-ONLY-TOKEN-12345","RawV2":"EXAMPLE-ONLY-TOKEN-12345:EXAMPLE-ONLY-PASSWORD","Redacted":"EXAMPLE-ONLY-TOKEN-12345","ExtraData":{"secret":"MUST-NOT-BE-STORED"}}
+{"SourceMetadata":{"Data":{"Git":{"commit":"0123456789abcdef","file":"config.env","line":4}}},"DetectorName":"ExampleToken","Verified":false,"Raw":"EXAMPLE-ONLY-TOKEN-12345","RawV2":"EXAMPLE-ONLY-TOKEN-12345:EXAMPLE-ONLY-PASSWORD"}
+{"SourceMetadata":{"Data":{"Git":{"commit":"abcdef0123456789","file":"EXAMPLE-ONLY-OTHER-TOKEN.txt","line":12}}},"DetectorName":"ExampleOther","Verified":false,"Raw":"EXAMPLE-ONLY-OTHER-TOKEN","Redacted":"EXAMPLE-ONLY-OTHER-TOKEN"}
+not json

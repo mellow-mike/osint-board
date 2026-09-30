@@ -1,0 +1,8 @@
+[
+  {"fuzzer": "*original", "domain": "example.com", "dns_a": ["192.0.2.1"]},
+  {"fuzzer": "addition", "domain": "examplee.com", "dns_a": ["203.0.113.10", "invalid"], "dns_aaaa": ["2001:0db8::1", "2001:db8::1"]},
+  {"fuzzer": "omission", "domain": "exmple.com", "dns_ns": ["ns.example.net"]},
+  {"fuzzer": "repetition", "domain": "examplee.com", "dns_a": ["203.0.113.10"]},
+  {"fuzzer": "hyphenation", "domain": "ex-ample.com"},
+  {"fuzzer": "addition", "domain": "malformed domain.com", "dns_a": ["203.0.113.11"]}
+]

@@ -39,6 +39,15 @@ def test_registry_for_input(registry):
     assert "securitytrails" in planned and "sublist3r" not in planned  # retired modules are never suggested
 
 
+def test_every_phase_one_and_two_module_is_registered(registry):
+    pending = [
+        info.spec.id
+        for info in registry.all()
+        if info.spec.phase in (1, 2) and info.status is not ModuleStatus.IMPLEMENTED
+    ]
+    assert pending == []
+
+
 def test_instantiate_and_kinds(registry):
     assert isinstance(registry.instantiate("usgs"), FeedModule)
     assert isinstance(registry.instantiate("crt_sh"), LookupModule)

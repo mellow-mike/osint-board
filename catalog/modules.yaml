@@ -2513,6 +2513,7 @@ modules:
     phase: 2
     priority: normal
     replacement: *id001
+    requires_authorization: true
   - id: keybase
     name: Keybase
     url: https://keybase.io/
