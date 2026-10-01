@@ -22,6 +22,8 @@ x-backend: &backend
     OSINT_MEILI_KEY: ${MEILI_MASTER_KEY:-osint-dev-master-key}
     OSINT_CATALOG_DIR: /app/catalog
     OSINT_LOG_JSON: "true"
+  volumes:
+    - ${GEOIP_DATA_DIR:-./data/geoip}:/data/geoip:ro
   depends_on:
     db: { condition: service_healthy }
     redis: { condition: service_healthy }
@@ -139,6 +141,8 @@ services:
       OSINT_MEILI_KEY: ${MEILI_MASTER_KEY:-osint-dev-master-key}
       OSINT_CATALOG_DIR: /app/catalog
     command: ["osint-board", "worker", "--queue", "tools"]
+    volumes:
+      - ${GEOIP_DATA_DIR:-./data/geoip}:/data/geoip:ro
     cap_add: ["NET_RAW"]   # nmap raw-packet scans; drop if you only run passive modules
     cpus: 2
     mem_limit: 2g

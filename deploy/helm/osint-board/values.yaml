@@ -36,6 +36,11 @@ ingress:
 #   OSINT_DATABASE_URL, OSINT_REDIS_URL, OSINT_MEILI_URL, OSINT_MEILI_KEY, and any OSINT_MODULE_*_API_KEY.
 existingSecret: osint-board-secrets
 
+# Optional existing PVC containing uncompressed GeoIP MMDB files. Configure OSINT_GEOIP_*_DB
+# paths under /data/geoip below. Use storage readable by every API/worker node (e.g. ReadOnlyMany).
+geoip:
+  existingClaim: ""
+
 config:
   OSINT_ENV: prod
   OSINT_LOG_JSON: "true"

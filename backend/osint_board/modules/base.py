@@ -108,6 +108,7 @@ class ModuleContext:
     scope: Scope = field(default_factory=Scope)
     config: dict[str, Any] = field(default_factory=dict)  # per-module settings from the DB / env
     rate_per_sec: float = 5.0
+    services: dict[str, Any] = field(default_factory=dict)
     log: Any = field(init=False, default=None)
     http: HttpClient = field(init=False, default=None)  # type: ignore[assignment]
 
@@ -160,6 +161,9 @@ class BaseModule(ABC):
 
     async def setup(self) -> None:  # noqa: B027 - optional hook
         """Called once before the first run (validate keys, warm caches)."""
+
+    async def teardown(self) -> None:  # noqa: B027 - optional hook
+        """Release resources owned by a lookup instance, including when its run fails."""
 
 
 class LookupModule(BaseModule):

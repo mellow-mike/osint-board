@@ -195,6 +195,7 @@ layers:
     default_visible: true
     sources: []
     description: Geolocated hosts, netblocks and ASN organisations from the active investigation.
+    attribution: "IP geolocation, when configured: [DB-IP](https://db-ip.com) · [MaxMind](https://www.maxmind.com) · [IPinfo](https://ipinfo.io)"
 
   - id: threat
     name: Threat intelligence

@@ -57,6 +57,8 @@ The authoritative list, with data sources, method, freshness/density targets and
 
 ## Frequency and density commitments
 
+These are phase targets; the implemented foundation and its current limits are recorded below.
+
 | Capability | Vendor typical | Internal target |
 |---|---|---|
 | IP geolocation refresh | weekly–monthly | daily merge; hourly for prefixes under investigation |
@@ -78,3 +80,35 @@ Phase 3 builds, in order: `geoip`, `meta_search`, `geocoder`,
 `tech_fingerprint`, `email_intel`, `company_intel`, `conflict_events`, `crypto_intel`, `app_intel`,
 `bucket_hunter`, `paste_monitor`, `social_engine`, `threat_scoring`, `scanner` (on-demand tier).
 Phase 4: `darkweb_crawler`, `breach_corpus`, `ai_analyst`, `p2p_monitor`, `scanner` continuous tier.
+
+## GeoIP foundation
+
+The phase-3 seed is `backend/osint_board/geo/geoip.py`, shared in-process by the API, geo resolver and lookup
+worker. It reads operator-supplied MMDBs: GeoLite2 City/ASN, DB-IP Lite City, and IPinfo Lite country/ASN
+(including the legacy country/ASN schema). Lookups require no network or third-party key. The first vendor
+adapter is `ipinfo`: with no token it uses this service; an optional token adds an IPinfo legacy API response
+to the evidence. An HTTP failure falls back to available local evidence. Other phase-3 vendors remain planned.
+
+`GET /api/geoip/{ip}` returns country, ASN, organization, location (possibly null), all source records with
+their matched prefix and database build time, disagreements and attribution links. `GET /api/geoip` reports
+source availability and refresh errors without exposing filesystem paths. Malformed IPs return 422,
+non-public addresses/no matching data return 404, and no usable configured database returns 503. An ASN-only
+answer remains useful even without coordinates. The geo resolver treats missing data as unlocated so entity
+persistence still works. IPinfo emissions keep evidence in the normal observation store.
+
+Country and ASN use one vote per vendor, weighted 1 for a current snapshot and 0.5 when older than
+`OSINT_GEOIP_MAX_AGE_DAYS` (45 by default); ties stay unresolved. A country disagreement permits at most a
+country halo when a winner exists. Distant city estimates coarsen the halo to region or country. Location
+confidence is a conservative heuristic, not a calibrated probability or a claim that anycast is resolved.
+Database accuracy radii can reduce precision; no IP answer is finer than city. Country-only data uses the
+existing centroid table; countries missing from that table remain unlocated rather than getting invented
+coordinates. Registered-country fields are never used as physical location.
+
+Each lookup checks for replacement files at most once per minute. A valid replacement swaps readers and
+closes the old mapping; a missing/corrupt update retains the last good snapshot and reports an error. Freshness
+means the MMDB build timestamp, not the time of the lookup. Optional live API records expose retrieval time
+and explicitly identify the unknown source build time. Replace files atomically, never modify a mapped file
+in place. No automatic downloader, daily merge, hourly investigation refresh, arbitrary as-of history,
+RIR/PTR/Atlas measurements, or vendor-parity benchmark is implemented yet. The synthetic offline fixtures
+validate parsing/fusion behavior only. [Deployment instructions](08-deployment.md#local-geoip) cover acquisition
+and mounts.

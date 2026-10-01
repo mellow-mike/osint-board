@@ -40,6 +40,17 @@ spec:
           livenessProbe: { httpGet: { path: /api/health, port: http }, periodSeconds: 30 }
           {{- end }}
           resources: {{- toYaml $spec.resources | nindent 12 }}
+          {{- if $root.Values.geoip.existingClaim }}
+          volumeMounts:
+            - { name: geoip, mountPath: /data/geoip, readOnly: true }
+          {{- end }}
+      {{- if $root.Values.geoip.existingClaim }}
+      volumes:
+        - name: geoip
+          persistentVolumeClaim:
+            claimName: {{ $root.Values.geoip.existingClaim | quote }}
+            readOnly: true
+      {{- end }}
 {{- end }}
 ---
 apiVersion: apps/v1

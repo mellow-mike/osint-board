@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
 from osint_board import __version__
-from osint_board.api.routes import catalog, health, investigations, layers, modules, search, stream
+from osint_board.api.routes import catalog, geoip, health, investigations, layers, modules, search, stream
 from osint_board.api.state import build_state
 from osint_board.config import Settings, get_settings
 from osint_board.logging import configure_logging
@@ -23,9 +23,12 @@ def create_app(settings: Settings | None = None, *, use_memory_index: bool = Fal
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.osint = await build_state(settings, use_memory_index=use_memory_index)
-        yield
-        if app.state.osint.redis is not None:
-            await app.state.osint.redis.aclose()
+        try:
+            yield
+        finally:
+            app.state.osint.registry.services["geoip"].close()
+            if app.state.osint.redis is not None:
+                await app.state.osint.redis.aclose()
 
     app = FastAPI(
         title="OSINT Board API",
@@ -47,6 +50,7 @@ def create_app(settings: Settings | None = None, *, use_memory_index: bool = Fal
     for router in (
         health.router,
         catalog.router,
+        geoip.router,
         search.router,
         layers.router,
         modules.router,

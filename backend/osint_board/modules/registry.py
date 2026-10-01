@@ -62,6 +62,7 @@ class Registry:
         self.catalog = catalog
         self._impl = implementations if implementations is not None else _IMPLEMENTATIONS
         self.settings = settings  # None: the process settings (get_settings()) at instantiate time
+        self.services: dict[str, Any] = {}
         unknown = set(self._impl) - {m.id for m in catalog.modules}
         if unknown:
             raise RuntimeError(f"implementations without catalog entry: {sorted(unknown)}")
@@ -115,6 +116,7 @@ class Registry:
             scope=scope or Scope(),
             config={**settings.module_config(module_id), **(config or {})},
             rate_per_sec=info.impl.rate_per_sec,
+            services=self.services,
         )
         return info.impl(ctx)
 

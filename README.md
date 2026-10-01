@@ -6,13 +6,14 @@ live vessel and aircraft tracking — is modelled in one catalog, wired through 
 everything with a location lands on the globe in the right place, at the right precision, with layer toggles
 and colour coding. A fast, type-aware search box is the entry point to every investigation.
 
-> Status: **phase 1 complete; phase 2 implementation complete, operational validation ongoing**.
-> All 109 phase-1 and 43 phase-2 modules have implementations and offline tests: 152 of 239 catalog entries.
+> Status: **phase 3 started — local GeoIP service and IPinfo fallback implemented**.
+> All 109 phase-1 and 43 phase-2 modules plus IPinfo have offline tests: 153 of 239 catalog entries.
 > Phase 2 includes keyless live aircraft, internal recon and document analysis, EasyList/EasyPrivacy matching,
 > linked-file discovery, scoped backup-file probes, and all 13 external-tool adapters. External tools need the
 > optional `tools` worker image. A fresh 24-hour feed soak remains a soft operational gate; offline tests do
 > not establish a successful live scanner deployment or uninterrupted upstream availability.
-> The remaining 74 planned and 13 retired entries belong to phases 3–4; see [the roadmap](docs/09-roadmap.md).
+> GeoIP reads operator-supplied DB-IP/GeoLite2/IPinfo MMDB files with provenance, freshness and disagreement flags.
+> The remaining 73 planned and 13 retired entries belong to phases 3–4; see [the roadmap](docs/09-roadmap.md).
 
 ## What it does
 
