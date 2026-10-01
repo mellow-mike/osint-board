@@ -221,7 +221,7 @@ export const LAYERS: readonly LayerSpec[] = [
     sources: [],
     description: "Geolocated hosts, netblocks and ASN organisations from the active investigation.",
     maxAgeS: null,
-    attribution: null,
+    attribution: "IP geolocation, when configured: [DB-IP](https://db-ip.com) · [MaxMind](https://www.maxmind.com) · [IPinfo](https://ipinfo.io)",
   },
   {
     id: "threat",

@@ -51,9 +51,10 @@ snallygaster and the community Wappalyzer engine); file-metadata and document ex
 milestone (soft gate, below); an authorised-scope investigation can run active recon end to end; tools run
 sandboxed with output parsed into entities; passive-only mode provably refuses them.
 *Implementation status:* all 43 phase-2 modules are implemented with offline tests, bringing phases 1–2 to
-152 implemented modules. The remaining catalog entries are 74 planned and 13 retired modules in phases 3–4.
-Live aircraft (`opensky` via `adsb_network`) and the soak harness are implemented. Deployment smoke tests and
-the final milestone's 24 h soak remain operational validation, rather than being implied by parser tests.
+152 implemented modules at the phase-2 milestone. Phase 3 progress is tracked below.
+Live aircraft (`opensky` via `adsb_network`) and the soak harness are implemented. The final milestone's
+24 h soak completed with the failure detailed below; live tool deployment validation remains separate
+from parser tests.
 
 The document/content extractors are implemented and tested: the web
 server and framework identifiers, the cookie extractor, the error-string extractor, the company- and
@@ -107,10 +108,12 @@ The final phase-2 modules complete the recon workflow:
   JavaScript. Other adapters cover network, vulnerability, TLS, CMS and WAF findings. Tools run on the
   separate `osint:tools` queue with timeout/cancellation cleanup and deployment resource limits.
 
-The existing `20260925T040645Z` soak report, from commit `8391a95`, recorded **FAIL** after a 65-minute GDELT
-success gap during missing upstream exports. It predates this milestone and is not evidence of a passing
-phase-2 exit. Record the fresh milestone soak's run directory and verdict in the PR; an in-progress run does
-not have a final verdict. See [deployment](08-deployment.md) for tool setup and known static-analysis limits.
+The final phase-2 soak, `data/soak/phase2-6388a91`, completed 24 h on 2026-09-29 with **FAIL**: GDELT had a
+75-minute success gap and missing-export 404s. Aircraft passed (4.88 million emitted positions), as did USGS,
+CelesTrak and Tor; database sampling and Redis had no failed queries/pings or rejected sink rows. Three
+credentialed feeds were disabled for missing keys. The GDELT upstream/export retry behavior remains an open
+operational issue, carried into phase 3; this soft gate does not block development. The older
+`20260925T040645Z` run also failed on a GDELT gap. See [deployment](08-deployment.md) for tool setup and limits.
 
 ### The 24-hour soak is a soft gate
 
@@ -127,6 +130,25 @@ Build the services in `docs/07-internal-replacements.md` in dependency order, st
 present; without a key the internal service answers.
 **Exit:** every capability behind a tiered API is available with no third-party key at documented freshness;
 `geoip` and `pdns` meet or beat their vendor equivalents on a benchmark set.
+
+*Started: GeoIP foundation.* `backend/osint_board/geo/geoip.py` reads local GeoLite2 City/ASN, DB-IP Lite
+City and IPinfo Lite MMDB snapshots for IPv4/IPv6. Answers retain source/prefix/build time, stale flags,
+country/ASN disagreements and conservative halo precision. API and workers share the service; `ipinfo`
+uses it without a key and optionally supplements it through an authenticated vendor request. Failed
+accelerators retain local results. `/api/geoip` exposes source status and `/api/geoip/{ip}` exposes evidence.
+Coverage is now **153 implemented, 73 planned, 13 retired**.
+
+This is the first service milestone, not the phase exit: database acquisition and updates are still
+operator-managed, arbitrary historical queries and RIR/PTR/Atlas/anycast enrichment remain planned, and
+fixture tests are not a vendor accuracy benchmark. See [the service contract](07-internal-replacements.md#geoip-foundation)
+and [setup](08-deployment.md#local-geoip). Next: `meta_search`, `geocoder`, and `pdns`, while expanding GeoIP
+refresh/history and the remaining vendor adapters.
+
+Milestone validation: `make check` passes (758 backend tests, 57 frontend tests), plus Compose configuration
+validation, Helm lint/render with GeoIP storage enabled, and an API smoke test against MaxMind's real test
+MMDB. The 24 h soak is **in progress** in `data/soak/phase3-geoip-20260930`, started 2026-09-30 19:51 UTC
+and due 2026-10-01 19:51 UTC. There is no final verdict yet. It runs the uncommitted working tree based on
+`2511a04`; the run directory includes the tracked patch and an archive of changed/new source files.
 
 ## Phase 4 — Internal replacements for commercial APIs (11 modules, 4 services)
 

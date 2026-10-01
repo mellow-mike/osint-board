@@ -9,7 +9,8 @@ from typing import Any
 
 from osint_board.catalog import Catalog, load_catalog
 from osint_board.config import Settings, get_settings
-from osint_board.geo.resolve import GeoResolver, MaxMindGeoIP
+from osint_board.geo.geoip import GeoIPService
+from osint_board.geo.resolve import GeoResolver
 from osint_board.logging import get_logger
 from osint_board.modules.registry import Registry
 from osint_board.search.index import EntityIndex, InMemoryIndex, MeiliIndex
@@ -90,6 +91,7 @@ async def build_state(settings: Settings | None = None, *, use_memory_index: boo
     settings = settings or get_settings()
     catalog = load_catalog(settings.resolved_catalog_dir)
     registry = Registry.discover(catalog)
+    registry.settings = settings
     services: dict[str, str] = {}
 
     index: EntityIndex
@@ -118,14 +120,9 @@ async def build_state(settings: Settings | None = None, *, use_memory_index: boo
             redis_retry_at = time.monotonic() + REDIS_RETRY_S
             services["redis"] = "unavailable"
 
-    geoip = None
-    if settings.geoip_city_db and settings.geoip_city_db.exists():
-        try:
-            geoip = MaxMindGeoIP(str(settings.geoip_city_db))
-            services["geoip"] = "mmdb"
-        except Exception as exc:  # noqa: BLE001
-            log.warning("geoip.unavailable", error=str(exc))
-    services.setdefault("geoip", "none (set OSINT_GEOIP_CITY_DB)")
+    geoip = GeoIPService.from_settings(settings)
+    registry.services["geoip"] = geoip
+    services["geoip"] = "local mmdb" if any(s["available"] for s in geoip.status()) else "unconfigured/unavailable"
 
     geo = GeoResolver(catalog, geoip=geoip)
     search = SearchService(catalog, index, registry)

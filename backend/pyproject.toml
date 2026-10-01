@@ -30,6 +30,7 @@ dependencies = [
   "python-dateutil>=2.9",
   "websockets>=12",
   "adblock>=0.6",
+  "maxminddb>=2.6,<4",
 ]
 
 [project.optional-dependencies]

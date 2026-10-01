@@ -33,4 +33,15 @@ spec:
               drop: ["ALL"]
               add: ["NET_RAW"]
           resources: {{- toYaml .Values.tools.resources | nindent 12 }}
+          {{- if .Values.geoip.existingClaim }}
+          volumeMounts:
+            - { name: geoip, mountPath: /data/geoip, readOnly: true }
+          {{- end }}
+      {{- if .Values.geoip.existingClaim }}
+      volumes:
+        - name: geoip
+          persistentVolumeClaim:
+            claimName: {{ .Values.geoip.existingClaim | quote }}
+            readOnly: true
+      {{- end }}
 {{- end }}

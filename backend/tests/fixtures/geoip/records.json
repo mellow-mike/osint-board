@@ -1,0 +1,18 @@
+{
+  "maxmind_city": {
+    "country": {"iso_code": "US"},
+    "registered_country": {"iso_code": "GB"},
+    "city": {"names": {"en": "Mountain View"}},
+    "subdivisions": [{"iso_code": "CA", "names": {"en": "California"}}],
+    "location": {"latitude": 37.386, "longitude": -122.0838, "accuracy_radius": 5}
+  },
+  "maxmind_asn": {"autonomous_system_number": 15169, "autonomous_system_organization": "Google LLC"},
+  "dbip_city": {
+    "country": {"iso_code": "US"},
+    "city": {"names": {"en": "Mountain View"}},
+    "location": {"latitude": 37.4229, "longitude": -122.085}
+  },
+  "ipinfo_lite": {"country_code": "US", "country": "United States", "asn": "AS15169", "as_name": "Google LLC"},
+  "ipinfo_legacy_db": {"country": "US", "country_name": "United States", "asn": "AS15169", "as_name": "Google LLC"},
+  "ipinfo_api": {"ip": "8.8.8.8", "city": "Mountain View", "region": "California", "country": "US", "loc": "37.3860,-122.0838", "org": "AS15169 Google LLC"}
+}

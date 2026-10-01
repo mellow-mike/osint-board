@@ -61,6 +61,7 @@ async def run_module(
                 )
 
     status, error, stats = "done", None, {}
+    mod = None
     try:
         mod = state.registry.instantiate(module_id, scope=scope, config=config)
         if not isinstance(mod, LookupModule):
@@ -89,6 +90,12 @@ async def run_module(
     except Exception as exc:  # noqa: BLE001
         status, error = "error", f"{type(exc).__name__}: {exc}"
         log.exception("module.run.failed", module=module_id, run_id=run_id)
+    finally:
+        if mod is not None:
+            try:
+                await mod.teardown()
+            except Exception:  # noqa: BLE001 - cleanup must not leave a completed run marked running
+                log.exception("module.teardown.failed", module=module_id, run_id=run_id)
     async with session_scope() as session:
         await session.execute(
             _RUN_END,
@@ -111,6 +118,10 @@ async def startup(ctx: dict[str, Any]) -> None:
 
 async def shutdown(ctx: dict[str, Any]) -> None:
     state = ctx.get("state")
+    if state:
+        geoip = state.registry.services.get("geoip")
+        if geoip is not None:
+            geoip.close()
     if state and state.redis is not None:
         await state.redis.aclose()
 

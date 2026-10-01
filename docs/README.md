@@ -1,7 +1,8 @@
 # OSINT Board documentation
 
-The catalog contains 239 modules. All 152 modules assigned to phases 1–2 are implemented with offline tests;
-74 remain planned and 13 upstream entries are retired. See the [roadmap](09-roadmap.md) for operational
+The catalog contains 239 modules. All 152 modules assigned to phases 1–2 plus phase-3 IPinfo are implemented
+with offline tests; 73 remain planned and 13 upstream entries are retired. Phase 3 begins with the local
+GeoIP service and its keyless IPinfo fallback. See the [roadmap](09-roadmap.md) for operational
 validation and the feed-soak status, and [deployment](08-deployment.md) to enable the optional tools worker.
 
 | Doc | What it covers |

@@ -13,6 +13,10 @@ router = APIRouter(tags=["health"])
 @router.get("/health", response_model=HealthOut)
 async def health(state: AppState = Depends(get_state)) -> HealthOut:
     services = dict(state.services)
+    geoip = state.registry.services.get("geoip")
+    if geoip is not None:
+        sources = geoip.status()
+        services["geoip"] = "local mmdb" if any(s["available"] for s in sources) else "unconfigured/unavailable"
     try:
         from sqlalchemy import text
 

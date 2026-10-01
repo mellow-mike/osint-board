@@ -86,6 +86,9 @@ class Settings(BaseSettings):
     # Geo
     geoip_city_db: Path | None = Field(default=None, description="Path to a GeoLite2/DB-IP City .mmdb file.")
     geoip_asn_db: Path | None = None
+    geoip_dbip_db: Path | None = Field(default=None, description="Additional DB-IP Lite City .mmdb.")
+    geoip_ipinfo_db: Path | None = Field(default=None, description="IPinfo Lite country/ASN .mmdb.")
+    geoip_max_age_days: int = Field(default=45, ge=1, description="Flag older database builds as stale.")
 
     # The dotenv files this instance was built from (``_env_file=`` overrides them, as for every field) and the
     # OSINT_MODULE_* values read from them on first use. pydantic-settings only fills declared fields from a dotenv

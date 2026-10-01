@@ -66,7 +66,9 @@ matter most:
 | `OSINT_PASSIVE_ONLY` | true | refuse active modules unless an investigation scope allows them |
 | `OSINT_OUTBOUND_PROXY` | unset | proxy requests made through the backend HTTP client; native scanners need their own egress configuration |
 | `OSINT_TOR_SOCKS_PROXY` | socks5h://tor:9050 | onion modules |
-| `OSINT_GEOIP_CITY_DB` | unset | path to a GeoLite2/DB-IP `.mmdb` for the interim geoip provider |
+| `OSINT_GEOIP_CITY_DB` / `OSINT_GEOIP_ASN_DB` | unset | local GeoLite2/DB-IP City and ASN MMDB paths |
+| `OSINT_GEOIP_DBIP_DB` / `OSINT_GEOIP_IPINFO_DB` | unset | additional DB-IP Lite City and IPinfo Lite MMDB inputs |
+| `OSINT_GEOIP_MAX_AGE_DAYS` | 45 | flag older database builds as stale and reduce their voting weight |
 | `OSINT_MODULE_<ID>_API_KEY` | unset | per-module credentials; ids match `catalog/modules.yaml` |
 | `OSINT_MODULE_<ID>_CONFIG` | unset | per-module options as a JSON object (e.g. `OSINT_MODULE_OPENSKY_CONFIG` for receivers, providers and the LADD/PIA policy; `poll_timeout` / `stream_idle_timeout` for any feed) |
 | `OSINT_MODULE_OPENSKY_CLIENT_ID` / `_CLIENT_SECRET` | unset | optional OpenSky API client (OAuth2 client credentials); read its terms first |
@@ -96,6 +98,39 @@ Phase-2 recon options use the same per-module JSON configuration mechanism:
 For example, `OSINT_MODULE_CROSS_REFERENCER_CONFIG='{"targets":["example.com"]}'` establishes the home domain
 against which candidate affiliate pages are checked. Junk-file probing is a separate authorized action;
 finding a document link does not imply permission to guess unlinked backup paths.
+
+## Local GeoIP
+
+Place uncompressed MMDB files in `data/geoip/`. Compose mounts this directory read-only at `/data/geoip` in
+the API, worker and tools containers (override the host directory with `GEOIP_DATA_DIR`). To start without
+an account, download the current **MMDB** edition of [DB-IP Lite City](https://db-ip.com/db/lite.php), decompress
+it to `data/geoip/dbip-city-lite.mmdb`, and set `OSINT_GEOIP_DBIP_DB=/data/geoip/dbip-city-lite.mmdb` in `.env`.
+For a backend running directly from a checkout, use the absolute host path instead.
+
+Optionally add [GeoLite2 City/ASN](https://dev.maxmind.com/geoip/geolite2-free-geolocation-data/) and
+[IPinfo Lite](https://ipinfo.io/developers/lite) snapshots through the other `OSINT_GEOIP_*_DB` variables;
+acquiring those datasets may require a provider account/token. Existing files are queried offline without
+credentials. DB-IP Lite is refreshed monthly upstream and requires attribution; the infrastructure layer
+credits configured providers, and API results carry attribution URLs. Retain these credits in downstream
+displays. The source schemas follow [DB-IP's MMDB documentation](https://db-ip.com/db/format/ip-to-city-lite/mmdb.html)
+and [IPinfo's Lite migration guide](https://community.ipinfo.io/t/migrating-from-ipinfo-country-asn-legacy-to-ipinfo-lite-mmdb-version/7268).
+
+Rebuild/recreate backend containers for this version, then inspect `GET /api/geoip` and
+`GET /api/geoip/8.8.8.8`. The API and lookup workers use identical settings. Selecting the `ipinfo` module
+also emits location/ASN/company graph entities from this local service. `OSINT_MODULE_IPINFO_API_KEY` enables
+an optional [authenticated legacy API request](https://support.ipinfo.io/hc/en-us/articles/34121895556242-Legacy-Free-API-vs-IPinfo-Lite);
+the no-key path never sends a request to IPinfo. A Lite-only token may not authorize the legacy endpoint;
+local evidence still works when that request fails.
+
+Updates are operator-managed: decompress to a temporary file in the mounted directory, then rename it over
+the configured filename. Readers detect replacements on the next lookup after at most 60 seconds and retain
+the last good file if loading fails. Mount the directory, not individual files, so renames are visible.
+Monitor build dates, stale flags and errors at `/api/geoip`; having a database configured does not guarantee
+that every address has a location. GeoIP precision never exceeds city and disagreements reduce it further.
+
+On Kubernetes, set `geoip.existingClaim` to an existing PVC containing these files and put the container paths
+in `config.OSINT_GEOIP_*_DB`. The chart mounts it read-only for API/worker/feeds/tools; provision storage
+readable from every node running those pods. Download and update datasets outside the application pods.
 
 ## Cloud (Kubernetes, Helm)
 
